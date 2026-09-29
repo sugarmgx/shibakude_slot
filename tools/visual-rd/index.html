@@ -1,0 +1,44 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><base href="../../"><title>PRIVATE_SPEC — Visual R&D</title>
+<style>body{margin:24px;background:#080b10;color:#d6dbe0;font:14px monospace}header{display:flex;gap:16px;align-items:center;margin-bottom:28px}button,select{background:#202b35;color:#fff;border:1px solid #657683;padding:8px}#film{width:100%;height:280px;border:5px ridge #5d6870;box-sizing:border-box}canvas{width:100%;height:100%;display:block}#metrics{white-space:pre-wrap}p{max-width:960px;line-height:1.7}</style></head><body>
+<header><strong>PRIVATE_SPEC / VISUAL R&D</strong><select id="version"><option value="current">CURRENT</option><option value="baseline">BASELINE</option></select><select id="scene"><option value="hall">同人音楽即売会</option><option value="station">橋本駅</option><option value="lounge">ラウンジ</option><option value="red">赤BIG</option><option value="blue">青BIG</option><option value="reg">REG</option><option value="baba">ババア臭</option><option value="unko">うんこ6</option><option value="battle">しばくで</option><option value="boost">開米</option><option value="upper">開開米</option></select><button id="snapshot">6秒の比較フレーム</button><button id="play">再生</button><button id="hit">打撃</button></header>
+<div><button id="cue-replay">予兆：リプレイ</button> <button id="cue-miss">予兆：不発</button> <button id="cue-stop">停止イベント</button></div>
+<div id="film"></div><pre id="metrics"></pre><p>独立した描画比較用ページ。ゲーム抽選・状態・保存データへ接続しない。BASELINEはR&D開始前。6秒ボタンは同一時刻へ移動して一枚描画する。通常プレイ画面からはリンクしない。</p>
+<script src="assets/vendor/three-r149.min.js"></script>
+<script src="app/normal-cue.js?v=1"></script>
+<script src="assets/vendor/local-file-assets.js?v=1"></script>
+<script>
+(async()=>{
+ const params=new URLSearchParams(location.search),version=params.get('version')==='baseline'?'baseline':'current';
+ document.querySelector('#version').value=version;
+ for(const src of ['app/cabinet-surfaces.js','app/cabinet-combat.js',...(version==='baseline'?['tools/visual-rd/baseline/cabinet-world.js','tools/visual-rd/baseline/digital-abstract-scene.js']:['app/cabinet-world.js','app/digital-abstract-scene.js'])])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src+'?rd=3';script.onload=resolve;script.onerror=reject;document.head.append(script);});
+ const scenes={station:['normal',0,'橋本駅',0xffb43b],hall:['normal',0,'同人音楽即売会',0xffb43b],lounge:['normal',0,'クラブのラウンジ',0xffb43b],red:['bonus',0,'',0xff3028],blue:['bonus',1,'',0x1687ff],reg:['bonus',2,'',0xffcf3f],baba:['challenge',0,'',0xffb43b],unko:['challenge',1,'',0xa68644],battle:['challenge',2,'',0xff6633],boost:['boost',0,'',0x32f6a0],upper:['boost',1,'',0x32f6a0]};
+ let scene;
+ function setup(key){
+   scene?.dispose();const [kind,variant,stage,color]=scenes[key];
+   scene=new DigitalAbstractScene(document.querySelector('#film'),THREE,{primaryColor:color});
+   scene.normalCue=new ShibakuNormalCue.NormalCue();
+   scene.setPresentation(kind,variant,{immediate:true,pulse:0});scene.scenery={stage,babaHits:1};scene.battleEnabled=key==='battle';
+   if(kind==='boost')scene.setTheme({emissionIntensity:.78,exposure:.86,effectIntensity:.48},{immediate:true});
+   scene.start();
+ }
+ const selection=document.querySelector('#scene');selection.value=scenes[params.get('scene')]?params.get('scene'):'hall';setup(selection.value);
+ selection.onchange=()=>setup(selection.value);
+ document.querySelector('#version').onchange=event=>location.href='tools/visual-rd/index.html?version='+event.target.value+'&scene='+selection.value;
+ document.querySelector('#snapshot').onclick=()=>{scene.stop();scene.setTimelineTime(6);scene.cabinetWorld.travel=0;scene.running=true;scene.renderFrame(performance.now());scene.stop();document.querySelector('#metrics').textContent=JSON.stringify(scene.renderer.info.render,null,2);};
+ document.querySelector('#play').onclick=()=>scene.running?scene.stop():scene.start();
+ for(const [id,role] of [['cue-replay','replay'],['cue-miss','miss']])document.querySelector('#'+id).onclick=()=>{
+   scene.normalCue.begin(role,0,performance.now());scene.start();
+ };
+ document.querySelector('#cue-stop').onclick=()=>scene.normalCue.stop(scene.normalCue.phase+1,performance.now(),scene.normalCue.role);
+ document.querySelector('#hit').onclick=()=>{
+   if(selection.value==='baba'&&scene.cabinetWorld.babaHit){scene.cabinetWorld.babaHit(Math.min(3,scene.cabinetWorld.babaCueHits+1));scene.start();return;}
+   scene.stop();scene.cabinetWorld.cue(2,'bell');
+   scene.cabinetWorld.beatAt=performance.now()-180;
+   if(scene.cabinetWorld.combat)scene.cabinetWorld.combat.startedAt=scene.cabinetWorld.beatAt;
+   scene.running=true;scene.renderFrame(performance.now());scene.stop();
+   const combat=scene.cabinetWorld.combat;
+   document.querySelector('#metrics').textContent=JSON.stringify({...scene.renderer.info.render,impactVisible:combat?.streaks?.visible,impactOpacity:combat?.streakMaterial?.opacity},null,2);
+ };
+ setInterval(()=>{if(scene.running)document.querySelector('#metrics').textContent=JSON.stringify({...scene.getMetrics(),cue:scene.normalCue.sample(performance.now())},null,2);},1000);
+})();
+</script></body></html>

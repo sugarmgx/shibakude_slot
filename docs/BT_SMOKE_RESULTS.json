@@ -1,0 +1,1298 @@
+{
+  "method": "app.js functions + reel-control.js; uniform independent press positions; immediate PUSH",
+  "seed": 820,
+  "batches": 2,
+  "limitations": [
+    "Not browser AUTO frame timing",
+    "Presentation RNG calls omitted",
+    "Finite run; final bonus/BT not completed"
+  ],
+  "note": "Economic-path smoke run; presentation-only finishing patches followed this run. Not a calibrated theoretical RTP.",
+  "results": [
+    {
+      "setting": 1,
+      "games": 200000,
+      "input": 600000,
+      "payout": 584561,
+      "rate": 97.42683333333333,
+      "batchStandardError": 2.7551666666666677,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 1,
+          "games": 100000,
+          "input": 300000,
+          "payout": 300546,
+          "modes": {
+            "normal": 69373,
+            "cz": 8209,
+            "bonus": 21300,
+            "bt": 1118
+          },
+          "roles": {
+            "miss->miss": 58150,
+            "watermelon->watermelon": 1366,
+            "replay->replay": 12502,
+            "bell->bell": 24890,
+            "strongCherry->strongCherry": 511,
+            "cherry->cherry": 1293,
+            "chance->miss": 212,
+            "watermelonChance->watermelonChance": 282,
+            "miss->babaSandwich": 503,
+            "replay->babaSandwich": 108,
+            "chance->chance": 4,
+            "barLine->barLine": 77,
+            "cherry->babaSandwich": 6,
+            "middleCherry->middleCherry": 4,
+            "bell->babaSandwich": 45,
+            "strongCherry->babaSandwich": 3,
+            "watermelonChance->miss": 29,
+            "watermelonChance->babaSandwich": 4,
+            "barLine->babaSandwich": 1,
+            "watermelon->babaSandwich": 10
+          },
+          "bellLines": [
+            0,
+            0,
+            35,
+            260,
+            370
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 100.182,
+          "delta": 546,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 69373,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 423,
+            "regHits": 251,
+            "czEntries": 941,
+            "czSuccesses": 372,
+            "czFails": 569,
+            "czByType": {
+              "unko": {
+                "entries": 475,
+                "successes": 124,
+                "fails": 351
+              },
+              "baba": {
+                "entries": 311,
+                "successes": 136,
+                "fails": 175
+              },
+              "shibaku": {
+                "entries": 155,
+                "successes": 112,
+                "fails": 43
+              }
+            }
+          }
+        },
+        {
+          "setting": 1,
+          "games": 100000,
+          "input": 300000,
+          "payout": 284015,
+          "modes": {
+            "normal": 71851,
+            "cz": 8181,
+            "bonus": 19003,
+            "bt": 965
+          },
+          "roles": {
+            "bell->bell": 22735,
+            "miss->miss": 60060,
+            "replay->replay": 12887,
+            "cherry->cherry": 1251,
+            "strongCherry->strongCherry": 477,
+            "watermelon->watermelon": 1339,
+            "watermelonChance->watermelonChance": 250,
+            "watermelonChance->miss": 37,
+            "bell->babaSandwich": 64,
+            "replay->babaSandwich": 106,
+            "miss->babaSandwich": 473,
+            "barLine->barLine": 59,
+            "chance->miss": 227,
+            "cherry->babaSandwich": 8,
+            "chance->chance": 10,
+            "watermelon->babaSandwich": 7,
+            "chance->babaSandwich": 2,
+            "middleCherry->middleCherry": 5,
+            "strongCherry->babaSandwich": 1,
+            "barLine->babaSandwich": 1,
+            "watermelonChance->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            42,
+            227,
+            332
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 94.67166666666667,
+          "delta": -15985,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 71851,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 374,
+            "regHits": 240,
+            "czEntries": 938,
+            "czSuccesses": 333,
+            "czFails": 605,
+            "czByType": {
+              "unko": {
+                "entries": 467,
+                "successes": 104,
+                "fails": 363
+              },
+              "baba": {
+                "entries": 318,
+                "successes": 127,
+                "fails": 191
+              },
+              "shibaku": {
+                "entries": 153,
+                "successes": 102,
+                "fails": 51
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "setting": 2,
+      "games": 200000,
+      "input": 600000,
+      "payout": 584338,
+      "rate": 97.38966666666667,
+      "batchStandardError": 0.21966666666666868,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 2,
+          "games": 100000,
+          "input": 300000,
+          "payout": 291510,
+          "modes": {
+            "normal": 70842,
+            "cz": 8045,
+            "bonus": 20031,
+            "bt": 1082
+          },
+          "roles": {
+            "replay->replay": 12671,
+            "miss->miss": 59190,
+            "bell->bell": 23769,
+            "strongCherry->strongCherry": 500,
+            "cherry->cherry": 1257,
+            "watermelon->watermelon": 1338,
+            "watermelonChance->watermelonChance": 262,
+            "miss->babaSandwich": 504,
+            "bell->babaSandwich": 61,
+            "chance->miss": 215,
+            "replay->babaSandwich": 110,
+            "barLine->barLine": 62,
+            "watermelonChance->miss": 31,
+            "cherry->babaSandwich": 7,
+            "watermelon->babaSandwich": 8,
+            "middleCherry->middleCherry": 4,
+            "chance->chance": 5,
+            "watermelonChance->babaSandwich": 3,
+            "chance->babaSandwich": 1,
+            "strongCherry->babaSandwich": 2
+          },
+          "bellLines": [
+            0,
+            0,
+            45,
+            226,
+            321
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 97.17,
+          "delta": -8490,
+          "finalMode": "cz",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 70842,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 399,
+            "regHits": 226,
+            "czEntries": 913,
+            "czSuccesses": 361,
+            "czFails": 551,
+            "czByType": {
+              "unko": {
+                "entries": 447,
+                "successes": 110,
+                "fails": 337
+              },
+              "baba": {
+                "entries": 317,
+                "successes": 141,
+                "fails": 176
+              },
+              "shibaku": {
+                "entries": 149,
+                "successes": 110,
+                "fails": 38
+              }
+            }
+          }
+        },
+        {
+          "setting": 2,
+          "games": 100000,
+          "input": 300000,
+          "payout": 292828,
+          "modes": {
+            "normal": 70451,
+            "cz": 8147,
+            "bonus": 20255,
+            "bt": 1147
+          },
+          "roles": {
+            "replay->replay": 12801,
+            "miss->miss": 59016,
+            "bell->bell": 23888,
+            "strongCherry->strongCherry": 501,
+            "watermelon->watermelon": 1297,
+            "cherry->cherry": 1219,
+            "bell->babaSandwich": 51,
+            "replay->babaSandwich": 124,
+            "miss->babaSandwich": 494,
+            "barLine->barLine": 68,
+            "watermelonChance->watermelonChance": 263,
+            "watermelonChance->miss": 30,
+            "chance->miss": 219,
+            "cherry->babaSandwich": 6,
+            "middleCherry->middleCherry": 3,
+            "chance->babaSandwich": 1,
+            "watermelon->babaSandwich": 10,
+            "chance->chance": 5,
+            "strongCherry->babaSandwich": 2,
+            "watermelonChance->babaSandwich": 1,
+            "barLine->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            42,
+            221,
+            331
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 97.60933333333334,
+          "delta": -7172,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 70451,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 407,
+            "regHits": 238,
+            "czEntries": 919,
+            "czSuccesses": 354,
+            "czFails": 565,
+            "czByType": {
+              "unko": {
+                "entries": 452,
+                "successes": 102,
+                "fails": 350
+              },
+              "baba": {
+                "entries": 314,
+                "successes": 138,
+                "fails": 176
+              },
+              "shibaku": {
+                "entries": 153,
+                "successes": 114,
+                "fails": 39
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "setting": 3,
+      "games": 200000,
+      "input": 600000,
+      "payout": 593441,
+      "rate": 98.90683333333334,
+      "batchStandardError": 1.1601666666666617,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 3,
+          "games": 100000,
+          "input": 300000,
+          "payout": 300201,
+          "modes": {
+            "normal": 68976,
+            "cz": 8541,
+            "bonus": 21386,
+            "bt": 1097
+          },
+          "roles": {
+            "replay->replay": 12470,
+            "miss->miss": 58395,
+            "bell->bell": 24780,
+            "cherry->cherry": 1275,
+            "watermelon->watermelon": 1308,
+            "strongCherry->strongCherry": 463,
+            "replay->babaSandwich": 125,
+            "miss->babaSandwich": 522,
+            "bell->babaSandwich": 53,
+            "watermelonChance->watermelonChance": 256,
+            "chance->miss": 219,
+            "watermelon->babaSandwich": 6,
+            "barLine->barLine": 80,
+            "cherry->babaSandwich": 6,
+            "watermelonChance->miss": 34,
+            "middleCherry->middleCherry": 4,
+            "chance->chance": 3,
+            "strongCherry->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            36,
+            223,
+            330
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 100.067,
+          "delta": 201,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 68976,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 421,
+            "regHits": 255,
+            "czEntries": 983,
+            "czSuccesses": 375,
+            "czFails": 608,
+            "czByType": {
+              "unko": {
+                "entries": 504,
+                "successes": 124,
+                "fails": 380
+              },
+              "baba": {
+                "entries": 331,
+                "successes": 144,
+                "fails": 187
+              },
+              "shibaku": {
+                "entries": 148,
+                "successes": 107,
+                "fails": 41
+              }
+            }
+          }
+        },
+        {
+          "setting": 3,
+          "games": 100000,
+          "input": 300000,
+          "payout": 293240,
+          "modes": {
+            "normal": 70285,
+            "cz": 8357,
+            "bonus": 20344,
+            "bt": 1014
+          },
+          "roles": {
+            "miss->miss": 58916,
+            "replay->replay": 12696,
+            "cherry->cherry": 1245,
+            "bell->bell": 23979,
+            "watermelon->watermelon": 1281,
+            "chance->miss": 223,
+            "watermelonChance->watermelonChance": 283,
+            "strongCherry->strongCherry": 530,
+            "bell->babaSandwich": 69,
+            "miss->babaSandwich": 503,
+            "replay->babaSandwich": 130,
+            "barLine->barLine": 72,
+            "watermelonChance->miss": 36,
+            "middleCherry->middleCherry": 8,
+            "watermelon->babaSandwich": 12,
+            "cherry->babaSandwich": 8,
+            "chance->chance": 4,
+            "watermelonChance->babaSandwich": 2,
+            "chance->babaSandwich": 2,
+            "barLine->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            31,
+            258,
+            328
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 97.74666666666667,
+          "delta": -6760,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 70285,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 399,
+            "regHits": 235,
+            "czEntries": 961,
+            "czSuccesses": 363,
+            "czFails": 598,
+            "czByType": {
+              "unko": {
+                "entries": 483,
+                "successes": 116,
+                "fails": 367
+              },
+              "baba": {
+                "entries": 343,
+                "successes": 144,
+                "fails": 199
+              },
+              "shibaku": {
+                "entries": 135,
+                "successes": 103,
+                "fails": 32
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "setting": 4,
+      "games": 200000,
+      "input": 600000,
+      "payout": 617971,
+      "rate": 102.99516666666666,
+      "batchStandardError": 0.6241666666666674,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 4,
+          "games": 100000,
+          "input": 300000,
+          "payout": 307113,
+          "modes": {
+            "normal": 67403,
+            "cz": 9100,
+            "bonus": 22309,
+            "bt": 1188
+          },
+          "roles": {
+            "replay->replay": 12448,
+            "bell->bell": 25680,
+            "miss->miss": 57368,
+            "cherry->cherry": 1231,
+            "watermelon->watermelon": 1315,
+            "strongCherry->strongCherry": 466,
+            "barLine->barLine": 77,
+            "miss->babaSandwich": 602,
+            "replay->babaSandwich": 140,
+            "chance->miss": 223,
+            "watermelonChance->watermelonChance": 298,
+            "watermelon->babaSandwich": 13,
+            "barLine->babaSandwich": 1,
+            "watermelonChance->miss": 47,
+            "bell->babaSandwich": 69,
+            "middleCherry->middleCherry": 3,
+            "cherry->babaSandwich": 12,
+            "chance->chance": 6,
+            "chance->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            41,
+            282,
+            393
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 102.371,
+          "delta": 7113,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 67403,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 438,
+            "regHits": 269,
+            "czEntries": 1040,
+            "czSuccesses": 406,
+            "czFails": 634,
+            "czByType": {
+              "unko": {
+                "entries": 525,
+                "successes": 135,
+                "fails": 390
+              },
+              "baba": {
+                "entries": 377,
+                "successes": 175,
+                "fails": 202
+              },
+              "shibaku": {
+                "entries": 138,
+                "successes": 96,
+                "fails": 42
+              }
+            }
+          }
+        },
+        {
+          "setting": 4,
+          "games": 100000,
+          "input": 300000,
+          "payout": 310858,
+          "modes": {
+            "normal": 67085,
+            "cz": 9065,
+            "bonus": 22655,
+            "bt": 1195
+          },
+          "roles": {
+            "bell->bell": 26187,
+            "miss->miss": 56820,
+            "replay->replay": 12569,
+            "watermelon->watermelon": 1316,
+            "strongCherry->strongCherry": 465,
+            "chance->chance": 4,
+            "cherry->cherry": 1278,
+            "watermelonChance->watermelonChance": 262,
+            "miss->babaSandwich": 565,
+            "replay->babaSandwich": 146,
+            "chance->miss": 192,
+            "barLine->barLine": 65,
+            "watermelonChance->miss": 30,
+            "watermelonChance->babaSandwich": 6,
+            "bell->babaSandwich": 71,
+            "cherry->babaSandwich": 9,
+            "middleCherry->middleCherry": 8,
+            "chance->babaSandwich": 1,
+            "watermelon->babaSandwich": 6
+          },
+          "bellLines": [
+            0,
+            0,
+            41,
+            262,
+            371
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 103.61933333333333,
+          "delta": 10858,
+          "finalMode": "bonus",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 67085,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 456,
+            "regHits": 262,
+            "czEntries": 1039,
+            "czSuccesses": 385,
+            "czFails": 654,
+            "czByType": {
+              "unko": {
+                "entries": 531,
+                "successes": 115,
+                "fails": 416
+              },
+              "baba": {
+                "entries": 362,
+                "successes": 168,
+                "fails": 194
+              },
+              "shibaku": {
+                "entries": 146,
+                "successes": 102,
+                "fails": 44
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "setting": 5,
+      "games": 200000,
+      "input": 600000,
+      "payout": 644142,
+      "rate": 107.357,
+      "batchStandardError": 1.320999999999998,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 5,
+          "games": 100000,
+          "input": 300000,
+          "payout": 326034,
+          "modes": {
+            "normal": 63836,
+            "cz": 10034,
+            "bonus": 24876,
+            "bt": 1254
+          },
+          "roles": {
+            "miss->miss": 55386,
+            "watermelon->watermelon": 1338,
+            "bell->bell": 28077,
+            "replay->replay": 11971,
+            "strongCherry->strongCherry": 435,
+            "cherry->cherry": 1257,
+            "chance->miss": 220,
+            "watermelonChance->watermelonChance": 307,
+            "miss->babaSandwich": 628,
+            "watermelon->babaSandwich": 20,
+            "replay->babaSandwich": 140,
+            "barLine->barLine": 78,
+            "watermelonChance->miss": 40,
+            "watermelonChance->babaSandwich": 5,
+            "bell->babaSandwich": 75,
+            "chance->babaSandwich": 1,
+            "cherry->babaSandwich": 7,
+            "chance->chance": 7,
+            "middleCherry->middleCherry": 7,
+            "strongCherry->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            74,
+            275,
+            399
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 108.678,
+          "delta": 26034,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 63836,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 491,
+            "regHits": 301,
+            "czEntries": 1143,
+            "czSuccesses": 450,
+            "czFails": 693,
+            "czByType": {
+              "unko": {
+                "entries": 570,
+                "successes": 152,
+                "fails": 418
+              },
+              "baba": {
+                "entries": 397,
+                "successes": 171,
+                "fails": 226
+              },
+              "shibaku": {
+                "entries": 176,
+                "successes": 127,
+                "fails": 49
+              }
+            }
+          }
+        },
+        {
+          "setting": 5,
+          "games": 100000,
+          "input": 300000,
+          "payout": 318108,
+          "modes": {
+            "normal": 65484,
+            "cz": 9474,
+            "bonus": 23804,
+            "bt": 1238
+          },
+          "roles": {
+            "miss->miss": 56231,
+            "replay->replay": 12191,
+            "bell->bell": 26989,
+            "cherry->cherry": 1275,
+            "watermelon->watermelon": 1385,
+            "watermelonChance->watermelonChance": 275,
+            "strongCherry->strongCherry": 479,
+            "miss->babaSandwich": 607,
+            "chance->miss": 224,
+            "replay->babaSandwich": 118,
+            "bell->babaSandwich": 66,
+            "barLine->barLine": 78,
+            "watermelonChance->miss": 43,
+            "watermelon->babaSandwich": 10,
+            "chance->chance": 7,
+            "middleCherry->middleCherry": 5,
+            "cherry->babaSandwich": 9,
+            "watermelonChance->babaSandwich": 3,
+            "barLine->babaSandwich": 1,
+            "chance->babaSandwich": 3,
+            "strongCherry->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            38,
+            250,
+            394
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 106.036,
+          "delta": 18108,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 65484,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 469,
+            "regHits": 285,
+            "czEntries": 1091,
+            "czSuccesses": 422,
+            "czFails": 669,
+            "czByType": {
+              "unko": {
+                "entries": 543,
+                "successes": 127,
+                "fails": 416
+              },
+              "baba": {
+                "entries": 373,
+                "successes": 170,
+                "fails": 203
+              },
+              "shibaku": {
+                "entries": 175,
+                "successes": 125,
+                "fails": 50
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "setting": 6,
+      "games": 200000,
+      "input": 600000,
+      "payout": 653941,
+      "rate": 108.99016666666667,
+      "batchStandardError": 2.9838333333333367,
+      "boost": {
+        "normal": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        },
+        "upper": {
+          "starts": 0,
+          "games": 0,
+          "input": 0,
+          "payout": 0,
+          "net": 0,
+          "rtpPoint": 0,
+          "averageNetPerStart": null
+        }
+      },
+      "parts": [
+        {
+          "setting": 6,
+          "games": 100000,
+          "input": 300000,
+          "payout": 318019,
+          "modes": {
+            "normal": 64403,
+            "cz": 10538,
+            "bonus": 23816,
+            "bt": 1243
+          },
+          "roles": {
+            "miss->miss": 56260,
+            "bell->bell": 27083,
+            "replay->replay": 12164,
+            "watermelon->watermelon": 1296,
+            "cherry->cherry": 1209,
+            "miss->babaSandwich": 630,
+            "strongCherry->strongCherry": 470,
+            "chance->miss": 203,
+            "replay->babaSandwich": 157,
+            "watermelonChance->watermelonChance": 286,
+            "bell->babaSandwich": 80,
+            "chance->babaSandwich": 3,
+            "chance->chance": 3,
+            "watermelon->babaSandwich": 16,
+            "barLine->babaSandwich": 3,
+            "watermelonChance->miss": 40,
+            "cherry->babaSandwich": 11,
+            "barLine->barLine": 81,
+            "middleCherry->middleCherry": 2,
+            "watermelonChance->babaSandwich": 2,
+            "strongCherry->babaSandwich": 1
+          },
+          "bellLines": [
+            0,
+            0,
+            58,
+            285,
+            412
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 106.00633333333333,
+          "delta": 18019,
+          "finalMode": "bonus",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 64403,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 474,
+            "regHits": 298,
+            "czEntries": 1212,
+            "czSuccesses": 442,
+            "czFails": 770,
+            "czByType": {
+              "unko": {
+                "entries": 629,
+                "successes": 137,
+                "fails": 492
+              },
+              "baba": {
+                "entries": 412,
+                "successes": 187,
+                "fails": 225
+              },
+              "shibaku": {
+                "entries": 171,
+                "successes": 118,
+                "fails": 53
+              }
+            }
+          }
+        },
+        {
+          "setting": 6,
+          "games": 100000,
+          "input": 300000,
+          "payout": 335922,
+          "modes": {
+            "normal": 61577,
+            "cz": 10767,
+            "bonus": 26279,
+            "bt": 1377
+          },
+          "roles": {
+            "replay->replay": 11950,
+            "miss->miss": 54114,
+            "bell->bell": 29371,
+            "strongCherry->strongCherry": 454,
+            "watermelon->watermelon": 1299,
+            "cherry->cherry": 1242,
+            "miss->babaSandwich": 717,
+            "watermelonChance->watermelonChance": 292,
+            "chance->miss": 194,
+            "replay->babaSandwich": 151,
+            "bell->babaSandwich": 66,
+            "barLine->barLine": 76,
+            "cherry->babaSandwich": 7,
+            "watermelonChance->miss": 41,
+            "chance->babaSandwich": 2,
+            "watermelon->babaSandwich": 10,
+            "chance->chance": 4,
+            "watermelonChance->babaSandwich": 4,
+            "strongCherry->babaSandwich": 1,
+            "barLine->babaSandwich": 2,
+            "middleCherry->middleCherry": 3
+          },
+          "bellLines": [
+            0,
+            0,
+            57,
+            325,
+            450
+          ],
+          "boost": {
+            "normal": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            },
+            "upper": {
+              "starts": 0,
+              "games": 0,
+              "input": 0,
+              "payout": 0,
+              "net": 0
+            }
+          },
+          "rate": 111.974,
+          "delta": 35922,
+          "finalMode": "normal",
+          "stats": {
+            "nextGraphGame": 50,
+            "normalGames": 61577,
+            "deltaGraph": [
+              {
+                "game": 0,
+                "delta": 0
+              }
+            ],
+            "bigHits": 514,
+            "regHits": 328,
+            "czEntries": 1214,
+            "czSuccesses": 492,
+            "czFails": 722,
+            "czByType": {
+              "unko": {
+                "entries": 579,
+                "successes": 156,
+                "fails": 423
+              },
+              "baba": {
+                "entries": 437,
+                "successes": 203,
+                "fails": 234
+              },
+              "shibaku": {
+                "entries": 198,
+                "successes": 133,
+                "fails": 65
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

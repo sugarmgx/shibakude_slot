@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>しばくでスロット BT</title>
+    <link rel="stylesheet" href="./app/styles.css?v=27" />
+    <link rel="stylesheet" href="./app/cabinet-ui.css?v=10" />
+    <link rel="stylesheet" href="./app/cabinet-finish.css?v=14" />
+    <link rel="stylesheet" href="./app/bt.css?v=3">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar data-counter">
+        <div class="counter-brand" aria-label="しばくでスロット">
+          <span class="counter-brand-mark">S</span>
+          <span>SHIBAKU<br />SLOT</span>
+        </div>
+        <div class="counter-readouts">
+          <div class="counter-cell counter-primary"><span>CURRENT</span><strong id="sectionGamesLabel">0G</strong></div>
+          <div class="counter-cell"><span>BIG</span><strong id="dataBigCountLabel">0</strong></div>
+          <div class="counter-cell"><span>REG</span><strong id="dataRegCountLabel">0</strong></div>
+          <div class="counter-cell counter-delta"><span>差枚</span><strong id="sectionDeltaLabel">0枚</strong></div>
+        </div>
+        <div id="counterChartSlot" class="counter-chart-slot" aria-label="差枚グラフ"></div>
+        <div class="legacy-summary" aria-hidden="true">
+          <span id="dataCzCountLabel">0</span><span id="dataLastBonusGamesLabel">0G</span>
+          <span id="modeLabel">通常時</span><span id="stageLabel">橋本駅</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls-panel">
+          <div class="section-head">
+            <h2>CONTROL / 操作</h2>
+          </div>
+
+          <div class="spin-fixed">
+            <button id="spinButton" class="primary-button">SPIN 1G</button>
+          </div>
+
+          <div class="controls-scroll">
+          <div class="control-row primary-row">
+            <button id="autoButton" class="ghost-button">AUTO OFF</button>
+            <button id="soundButton" class="ghost-button active">SOUND ON</button>
+            <button id="resetButton" class="ghost-button">RESET</button>
+          </div>
+
+          <div class="control-row speed-row">
+            <button id="speed1Button" class="ghost-button active">AUTO x1</button>
+            <button id="speed2Button" class="ghost-button">AUTO x2</button>
+            <button id="speed3Button" class="ghost-button">AUTO x3</button>
+            <button id="debugFastButton" class="ghost-button">DEBUG FAST</button>
+            <button id="overdriveButton" class="ghost-button hidden">OVERDRIVE x100</button>
+          </div>
+
+          <div class="control-row settings-row">
+            <label class="field">
+              <span>設定</span>
+              <select id="settingSelect">
+                <option value="random">おまかせ</option>
+                <option value="1">設定1</option>
+                <option value="2">設定2</option>
+                <option value="3">設定3</option>
+                <option value="4">設定4</option>
+                <option value="5">設定5</option>
+                <option value="6">設定6</option>
+              </select>
+            </label>
+
+            <div class="field volume-field">
+              <span>SE VOLUME <strong id="soundVolumeLabel">4 / 5</strong></span>
+              <div class="volume-stepper" role="group" aria-label="SE音量">
+                <button id="soundVolumeDown" class="volume-arrow" type="button" aria-label="SE音量を下げる">◀</button>
+                <div id="soundVolumeMeter" class="volume-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+                <button id="soundVolumeUp" class="volume-arrow" type="button" aria-label="SE音量を上げる">▶</button>
+              </div>
+            </div>
+
+            <div class="field volume-field">
+              <span>BGM VOLUME <strong id="musicVolumeLabel">5 / 5</strong></span>
+              <div class="volume-stepper" role="group" aria-label="BGM音量">
+                <button id="musicVolumeDown" class="volume-arrow" type="button" aria-label="BGM音量を下げる">◀</button>
+                <div id="musicVolumeMeter" class="volume-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+                <button id="musicVolumeUp" class="volume-arrow" type="button" aria-label="BGM音量を上げる">▶</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-head debug-head">
+            <h2>演出テスト</h2>
+          </div>
+
+          <div class="debug-grid">
+            <button data-force="roleMiss" class="debug-button">1枚役</button>
+            <button data-force="roleReplay" class="debug-button">リプレイ</button>
+            <button data-force="roleBell" class="debug-button">ベル</button>
+            <button data-force="roleWatermelon" class="debug-button">スイカ</button>
+            <button data-force="roleCherry" class="debug-button">弱チェリー</button>
+            <button data-force="roleStrongCherry" class="debug-button">強チェリー</button>
+            <button data-force="roleWatermelonChance" class="debug-button">スイカハズレ</button>
+            <button data-force="roleChance" class="debug-button">チャンス目</button>
+            <button data-force="roleBarLine" class="debug-button">BAR揃い（BONUS）</button>
+            <button data-force="middleCherry" class="debug-button">中段チェリー</button>
+            <button data-force="normalCz" class="debug-button">通常CZ</button>
+            <button data-force="unkoCz" class="debug-button">うんこ6ゲーム</button>
+            <button data-force="shibakuCz" class="debug-button">しばくでCZ</button>
+            <button id="czGuaranteedButton" class="debug-button" type="button">CZ 100% OFF</button>
+            <button data-force="regBonus" class="debug-button">REG</button>
+            <button data-force="redBigBonus" class="debug-button">赤7 BIG</button>
+            <button data-force="blueBigBonus" class="debug-button">青7 BIG</button>
+            <button data-force="btStandard" class="debug-button">BT（赤・GOLD後）</button>
+            <button data-force="btBlue" class="debug-button">BT（青後）</button>
+            <button data-force="goldReg" class="debug-button">GOLD REG</button>
+          </div>
+          <div class="section-head debug-head">
+            <h2>ステージテスト</h2>
+          </div>
+          <div class="debug-grid">
+            <button data-debug-stage="橋本駅" class="debug-button" type="button">橋本駅</button>
+            <button data-debug-stage="同人音楽即売会" class="debug-button" type="button">同人音楽即売会</button>
+            <button data-debug-stage="クラブのラウンジ" class="debug-button" type="button">クラブのラウンジ</button>
+          </div>
+          </div>
+        </section>
+
+        <section class="center-column">
+          <section class="panel stats-panel">
+            <div class="section-head">
+              <h2>DATA</h2>
+            </div>
+            <div id="deltaChart" class="delta-chart"></div>
+            <div class="stats-grid">
+              <div class="stat-card"><span>合算</span><strong id="bonusRateLabel">--</strong></div>
+              <div class="stat-card"><span>BIG</span><strong id="bigRateLabel">--</strong></div>
+              <div class="stat-card"><span>REG</span><strong id="regRateLabel">--</strong></div>
+              <div class="stat-card"><span>CZ</span><strong id="czEntryRateLabel">--</strong></div>
+              <div class="stat-card"><span>CZ突破</span><strong id="czSuccessRateLabel">--</strong></div>
+              <div class="stat-card"><span>うんこCZ突破</span><strong id="unkoCzSuccessRateLabel">--</strong></div>
+              <div class="stat-card"><span>ババアCZ突破</span><strong id="babaCzSuccessRateLabel">--</strong></div>
+              <div class="stat-card"><span>しばくでCZ突破</span><strong id="shibakuCzSuccessRateLabel">--</strong></div>
+            </div>
+          </section>
+
+          <section class="machine-panel">
+            <div class="machine-top">
+              <div>
+                <p class="machine-title">MAIN MONITOR / REEL UNIT</p>
+                <strong id="bgmLabel">環境音</strong>
+              </div>
+              <div class="machine-meta">
+                <span id="modeSummary">通常ステージ</span>
+                <span id="detailBadge">NORMAL 0G</span>
+              </div>
+            </div>
+
+            <div id="banner" class="banner hidden"></div>
+
+            <div id="lcdScreen" class="lcd-screen mode-normal">
+              <div id="lcdStage" class="lcd-stage" aria-hidden="true"></div>
+
+              <div id="lcdPushNavi" class="lcd-push-navi hidden">
+
+
+                <div class="lcd-navi-numbers">
+                  <strong data-navi-reel="0">1</strong>
+                  <strong data-navi-reel="1">2</strong>
+                  <strong data-navi-reel="2">3</strong>
+                </div>
+              </div>
+              
+              <div class="lcd-corner lcd-corner-left" aria-hidden="true"></div>
+              <div class="lcd-corner lcd-corner-right" aria-hidden="true"></div>
+              <div class="lcd-copy">
+                <span id="lcdKicker" class="lcd-kicker"></span>
+                <strong id="lcdTitle" class="lcd-title">通常ステージ</strong>
+                <span id="lcdSubtitle" class="lcd-subtitle">レバーオンで抽選開始</span>
+              </div>
+              <div class="lcd-meter" aria-hidden="true"><span id="lcdMeterFill"></span></div>
+              <div id="lcdBellAward" aria-hidden="true"></div>
+              <div class="lcd-post-fx" aria-hidden="true"></div>
+            </div>
+
+            <div class="push-bridge"><button id="battlePushButton" type="button" disabled><span>PUSH</span></button></div>
+            <div class="machine-window">
+              <div id="effectStage" class="effect-stage" aria-hidden="true"></div>
+              <div class="cabinet-lights" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div id="effectFlash" class="effect-flash" aria-hidden="true"></div>
+              <div id="pushNavi" class="push-navi hidden">
+                <span class="navi-title">PUSH ORDER</span>
+                <strong id="pushNaviText">--</strong>
+              </div>
+              <div id="reels" class="reels">
+                <div class="payline payline-top"></div>
+                <div class="payline payline-middle"></div>
+                <div class="payline payline-bottom"></div>
+                <div class="payline payline-diagonal payline-down"></div>
+                <div class="payline payline-diagonal payline-up"></div>
+                <div class="reel" data-reel="0"></div>
+                <div class="reel" data-reel="1"></div>
+                <div class="reel" data-reel="2"></div>
+              </div>
+            </div>
+
+            <div class="machine-bottom segment-bank">
+              <div class="machine-bottom-item">
+                <span>CREDIT</span>
+                <strong id="creditLabel">--</strong>
+              </div>
+              <div class="machine-bottom-item">
+                <span>PAYOUT</span>
+                <strong id="payoutLabel">0</strong>
+              </div>
+              <div class="machine-bottom-item">
+                <span>BET</span>
+                <strong id="betLabel">3</strong>
+              </div>
+              <div class="legacy-machine-values" aria-hidden="true">
+                <strong id="totalGamesLabel">0G</strong><strong id="totalDeltaLabel">0枚</strong><strong id="actualSettingLabel">?</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel roadmap-panel" hidden>
+            <div class="section-head">
+              <h2>規定ゲーム数</h2>
+            </div>
+            <ul id="roadmapList" class="roadmap-list"></ul>
+          </section>
+
+          <section class="panel log-panel">
+            <div class="section-head">
+              <h2>イベントログ</h2>
+            </div>
+            <ul id="logList" class="log-list"></ul>
+          </section>
+        </section>
+
+        <aside class="right-column">
+          <section class="panel status-panel" hidden>
+            <div class="section-head">
+              <h2>現在値</h2>
+            </div>
+            <dl class="status-list">
+              <div>
+                <dt>有利区間</dt>
+                <dd id="routeLabel">通常ルート</dd>
+              </div>
+              <div>
+                <dt>次の山場</dt>
+                <dd id="nextGateLabel">50G</dd>
+              </div>
+              <div>
+                <dt>天井</dt>
+                <dd id="ceilingLabel">810G + 0</dd>
+              </div>
+              <div>
+                <dt>通常モード</dt>
+                <dd id="normalModeLabel">内部非公開</dd>
+              </div>
+              <div>
+                <dt>上位AT</dt>
+                <dd id="atStatusLabel">待機中</dd>
+              </div>
+              <div>
+                <dt>玉チャレンジ</dt>
+                <dd id="tamaStatusLabel">未突入</dd>
+              </div>
+              <div>
+                <dt>489示唆</dt>
+                <dd id="premiumLabel">未出現</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel detail-panel">
+            <div class="section-head">
+              <h2>詳細</h2>
+            </div>
+            <div id="detailPanel" class="detail-rows"></div>
+          </section>
+
+          <section class="panel spec-panel">
+            <div class="section-head"><h2>遊び方</h2></div>
+            <div class="spec-block"><h3>PLAY</h3><p>SPACEでレバー・停止。1・2・3でもリールを停止できます。</p></div>
+            <div class="spec-block"><h3>BONUS TRIGGER</h3><p>ルーレットは第三停止で決着。ハズレでランプが1つ消灯、リトライで再点灯。</p></div>
+            <div class="spec-block"><h3>DATA / MENU</h3><p>TABでDATA、ESCでメニュー、F1で開発用操作。</p></div>
+            <p id="settingDesignText" hidden></p>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script defer src="./assets/vendor/three-r149.min.js"></script>
+    <script defer src="./assets/vendor/local-file-assets.js?v=1"></script>
+    <script defer src="./assets/vendor/cabinet-assets.js?v=1"></script>
+    <script defer src="./assets/textures/title/metal-machined-micro-v1.js?v=1"></script>
+    <script defer src="./assets/fonts/line-seed-jp-extrabold.typeface.js?v=1"></script>
+    <script defer src="./assets/fonts/slot-black.typeface.js?v=1"></script>
+    <script defer src="./app/cabinet-hdri.js?v=7"></script>
+    <script defer src="./app/cabinet-title.js?v=13-bt2"></script>
+    <script defer src="./app/cabinet-ui.js?v=10"></script>
+    <script defer src="./app/cabinet-surfaces.js?v=4"></script>
+    <script defer src="./app/cabinet-combat.js?v=3"></script>
+    <script defer src="./app/normal-cue.js?v=1"></script>
+    <script defer src="./app/cabinet-world.js?v=25"></script>
+    <script defer src="./app/digital-abstract-scene.js?v=19"></script>
+    <script defer src="./app/visual-effects.js?v=38-bt3"></script>
+    <script defer src="./app/reel-control.js?v=1"></script>
+    <script defer src="./app/bt-rules.js?v=2"></script>
+    <script defer src="./app/bt-presentation.js?v=3"></script>
+    <script defer src="./app/app.js?v=bt3"></script>
+  </body>
+</html>
