@@ -2114,6 +2114,12 @@ async function revealBattlePush() {
   ui.battleRevealing = true;
   renderInteractivity();
   const won = Boolean(cz.heldAward);
+  // 4: a beat of silence between the press and the answer.
+  if (!ui.debugFast) {
+    stopAllSoundEffects();
+    await window.ShibakuEffects?.silenceBeat?.(380);
+    if (generation !== ui.operationGeneration || state.cz !== cz) return;
+  }
   // C9: 勝利時の一部は、一度ガラスにヒビが入ってから割れて逆転する(演出側の抽選)。
   const revival = !ui.debugFast && won && Boolean(window.ShibakuEffects?.battleRevivalRoll?.());
   if (revival) {
@@ -2979,14 +2985,27 @@ function beginPendingSpin(afterState, force = null) {
     ui.pendingSpin.finishResolver = resolve;
   });
 
-  startSpinLoop();
+  // 5: premium reverse freeze on a small share of normal-play wins
+  // (presentation-only draw; the result is already fixed).
+  const reverseFreeze = state.mode === "normal"
+    && afterState.mode === "bonusReady"
+    && !middleCherryResult
+    && !ui.debugFast
+    && Boolean(window.ShibakuEffects?.reverseFreezeRoll?.());
+  if (reverseFreeze) {
+    runReverseFreeze(ui.pendingSpin, afterState.bonusReady?.type === "BLUE_BIG" ? "青7" : "赤7");
+  } else {
+    startSpinLoop();
+  }
   render();
   if (state.mode === "cz" && state.cz) window.ShibakuEffects?.czLever?.(state.cz.key, state.cz.gamesLeft);
   window.ShibakuEffects?.normalCueBegin?.(state, afterState);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
     window.ShibakuEffects?.battleBeat?.(0, afterState.cz?.lastBattleRole);
   }
-  if (fakeReach) {
+  if (ui.reelFreezeActive) {
+    // The reverse freeze plays its own sound and starts the spin sound later.
+  } else if (fakeReach) {
     playSoundEffect("fakeReach");
   } else if (!reelSpinSuppressed) {
     playSpinStartSound();
@@ -3009,11 +3028,59 @@ function beginPendingSpin(afterState, force = null) {
     ui.tamaFreezePromise = triggerTamaOpportunity(0);
   }
 
-  if (state.auto) {
+  if (state.auto && !ui.reelFreezeActive) {
     autoStopPendingSpin();
   }
 
   return ui.pendingSpin.finishPromise;
+}
+
+// Reels crawl backwards and settle with the seven lined up on the middle
+// row, hold, then the normal spin starts. Stops are locked meanwhile.
+async function runReverseFreeze(pending, symbol) {
+  ui.reelFreezeActive = true;
+  renderInteractivity();
+  const holdMs = window.ShibakuEffects?.reverseFreeze?.() || 0;
+  const starts = [...ui.reelPositions];
+  const targets = REEL_STRIPS.map((strip, reelIndex) => {
+    const index = strip.indexOf(symbol);
+    return wrapIndex(index - 1, strip.length);
+  });
+  const travel = targets.map((target, reelIndex) => {
+    const length = REEL_STRIPS[reelIndex].length;
+    return wrapIndex(target - Math.floor(starts[reelIndex]), length) + length - (starts[reelIndex] % 1);
+  });
+  const crawlMs = 2600;
+  const began = performance.now();
+  await new Promise((resolve) => {
+    const frame = (now) => {
+      if (ui.pendingSpin !== pending) return resolve();
+      const t = Math.min(1, (now - began) / crawlMs);
+      // Each reel finishes a little later, easing into the seven.
+      ui.reelPositions = starts.map((start, reelIndex) => {
+        const local = Math.min(1, t * (1 + (2 - reelIndex) * 0.12));
+        const eased = 1 - (1 - local) ** 3;
+        return wrapIndex(start + travel[reelIndex] * eased, REEL_STRIPS[reelIndex].length);
+      });
+      ui.displayReels = REEL_STRIPS.map((_, reelIndex) => visibleWindowFromPosition(reelIndex, ui.reelPositions[reelIndex]));
+      renderReels();
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+  if (ui.pendingSpin !== pending) return;
+  ui.reelPositions = [...targets];
+  renderReels();
+  window.ShibakuEffects?.reverseFreezeAligned?.();
+  await sleep(holdMs);
+  if (ui.pendingSpin !== pending) return;
+  ui.reelFreezeActive = false;
+  ui.lastFrameAt = 0;
+  startSpinLoop();
+  playSpinStartSound();
+  renderInteractivity();
+  if (state.auto) autoStopPendingSpin();
 }
 
 async function animateReelSlip(reelIndex, targetStop, pendingAtStart = ui.pendingSpin) {
@@ -3451,6 +3518,7 @@ function recoverReelSpin(error, beforeState, phase) {
   ui.displayReels = null;
   ui.reelPositions = [...state.reelStops];
   ui.tamaFreezeActive = false;
+  ui.reelFreezeActive = false;
   ui.tamaFreezePromise = null;
   clearTimeout(ui.actionLockTimer);
   ui.actionLockedUntil = 0;
@@ -3475,7 +3543,7 @@ async function stopReel(reelIndex) {
 }
 
 async function stopReelChecked(reelIndex) {
-  if (!ui.spinning || !ui.pendingSpin || ui.pendingSpin.resolving || ui.tamaFreezeActive) {
+  if (!ui.spinning || !ui.pendingSpin || ui.pendingSpin.resolving || ui.tamaFreezeActive || ui.reelFreezeActive) {
     return;
   }
 
@@ -3512,8 +3580,11 @@ async function stopReelChecked(reelIndex) {
   if (reelIndex === 0 && ui.pendingSpin.presentationRoleKey === "babaSandwich") {
     const hitNumber = ui.pendingSpin.afterState.cz?.babaSandwichHits || 0;
     if (hitNumber >= 3) {
+      // 4: silence, then the confirm sound.
       stopBonusMusic();
-      playSoundEffect("ichikaku");
+      stopAllSoundEffects();
+      const generation = ui.operationGeneration;
+      window.setTimeout(() => { if (generation === ui.operationGeneration) playSoundEffect("ichikaku"); }, ui.debugFast ? 0 : 350);
     } else {
       playSoundEffect("tenpai");
     }
@@ -3672,6 +3743,24 @@ function finishPendingSpin() {
     window.ShibakuEffects.czDevelop(beforeState, afterState);
     lockMainAction(1850, "cz-develop");
   }
+  // 1 / 4 / 10: reel flash, a beat of silence and the unko reversal ahead of the result.
+  const winFromNormal = beforeState.mode === "normal" && ["bonusReady", "bonus"].includes(afterState.mode)
+    && afterState.internalRoleKey !== "middleCherry";
+  const czFromNormal = beforeState.mode === "normal" && afterState.mode === "cz";
+  if (!ui.debugFast && (winFromNormal || czFromNormal)) window.ShibakuEffects?.reelFlash?.(winFromNormal ? "win" : "cz");
+  const unkoReversal = !ui.debugFast
+    && beforeState.mode === "cz" && beforeState.cz?.key === "unko" && beforeState.cz.gamesLeft === 1
+    && afterState.mode === "bonusReady"
+    && Boolean(window.ShibakuEffects?.czRevivalRoll?.());
+  let resultSoundDelay = 0;
+  if (unkoReversal) {
+    resultSoundDelay = window.ShibakuEffects.czRevival() || 0;
+    lockMainAction(resultSoundDelay + 300, "cz-revival");
+  } else if (winFromNormal && !ui.debugFast) {
+    stopAllSoundEffects();
+    resultSoundDelay = 380;
+    window.ShibakuEffects?.silenceBeat?.(resultSoundDelay);
+  }
   // D10: the drum lands (slow / slip / overshoot) before the result shows.
   const btLandingMs = btDrumResult && !ui.debugFast
     ? window.ShibakuEffects?.btLanding?.(btDrumResult, beforeState.bt?.misses || 0) || 0
@@ -3682,8 +3771,17 @@ function finishPendingSpin() {
     lockMainAction(1100, "baba-bonus-ready");
   }
   render();
-  playTransitionSounds(beforeState, afterState);
-  playResultSound(afterState);
+  if (resultSoundDelay) {
+    const generation = ui.operationGeneration;
+    window.setTimeout(() => {
+      if (generation !== ui.operationGeneration) return;
+      playTransitionSounds(beforeState, afterState);
+      playResultSound(afterState);
+    }, resultSoundDelay);
+  } else {
+    playTransitionSounds(beforeState, afterState);
+    playResultSound(afterState);
+  }
   window.ShibakuEffects?.transition(beforeState, afterState);
   if (beforeState.mode === "bt" && ["miss", "end", "retry"].includes(afterState.btView?.result)) {
     if (afterState.btView.result !== "retry") {
@@ -3943,6 +4041,7 @@ function resetAll() {
   ui.battleWaitPromise = null;
   ui.battleRevealing = false;
   ui.battleCharging = false;
+  ui.reelFreezeActive = false;
   ui.battleFailureSound = null;
   ui.autoGeneration += 1;
   ui.mainActionPromise = null;
@@ -4381,7 +4480,7 @@ function renderButtons() {
 function renderInteractivity() {
   const maxBet = document.querySelector("#maxBetButton");
   const locked = actionLockRemaining() > 0;
-  const frozen = ui.tamaFreezeActive || Boolean(state.cz?.pushPending) || ui.battleRevealing;
+  const frozen = ui.tamaFreezeActive || ui.reelFreezeActive || Boolean(state.cz?.pushPending) || ui.battleRevealing;
   const battlePush = document.querySelector("#battlePushButton");
   if (battlePush) {
     const pushReady = Boolean(state.cz?.pushPending) && !ui.battleRevealing && !ui.battleCharging;

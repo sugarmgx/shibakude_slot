@@ -482,6 +482,10 @@
       this.combat?.cue(beat,this.favour);
       this.waiting = false; this.outcome = null;
     }
+    // Presentation only: a punch landing (strength 0..1) and whether the
+    // enemy is visibly on the ropes.
+    enemyHit(strength = 1) { this.enemyHitAt = performance.now(); this.enemyHitStrength = strength; }
+    enemyStagger(on) { this.enemyStaggering = on; }
     babaHit(hits) {
       // Public success event only; never inspect the future CZ outcome.
       this.babaCueHits=Math.max(0,Math.min(3,hits));this.babaCueAt=performance.now();
@@ -594,9 +598,12 @@
       this.impact.scale.setScalar(1.2+Math.min(age,1)*5);
       this.impactMaterial.opacity = attack && !this.waiting ? hit*.9 : 0;
       this.impactMaterial.color.set(this.favour > 0 ? 0xacf2ff : 0xff5b27);
-      this.enemy.position.set(recoil*.6, .25 + Math.sin(time*1.1)*.09, -3 - Math.max(0,recoil)*2 + (this.favour < 0 && attack ? hit*2 : 0));
+      const knockAge = Math.max(0, (performance.now() - (this.enemyHitAt || -1e9)) / 1000);
+      const knock = (this.enemyHitStrength || 0) * Math.exp(-knockAge * 4) * Math.sin(Math.min(Math.PI, knockAge * 9) + .4);
+      const sway = this.enemyStaggering && this.outcome === null ? 1 : 0;
+      this.enemy.position.set(recoil*.6 + sway*Math.sin(time*2.3)*.35, .25 + Math.sin(time*1.1)*.09 - sway*.12 - knock*.15, -3 - Math.max(0,recoil)*2 + (this.favour < 0 && attack ? hit*2 : 0) - knock*2.2);
       // Keep facial features vertically aligned from the player's viewpoint, including on recoil.
-      this.enemy.rotation.set(recoil*.06,recoil*.12,0);
+      this.enemy.rotation.set(recoil*.06 - knock*.25, recoil*.12, sway*Math.sin(time*2.3+.6)*.14 + knock*.18);
       this.enemy.scale.setScalar(this.outcome === true ? Math.max(.03,1.4-age*2) : 1.4);
       o.camera.position.set(attack && this.favour < 0 ? Math.sin(age*44)*hit*.18 : 0, .3, this.waiting ? 8.5 : 8.5 - (this.beat === 1 ? hit*.8 : 0));
       o.camera.fov = 52; o.camera.updateProjectionMatrix(); o.camera.lookAt(0,0,-4);

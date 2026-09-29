@@ -32,6 +32,7 @@
     rouletteStop: {},
     lastLamp: {},
     premiumHit: {},
+    reverseFreeze: {},
   };
 
   const files = new Map();   // name -> HTMLAudioElement (only when the file loaded)
@@ -269,6 +270,13 @@
       tone(ctx, out, { f0: 62, f1: 44, t, dur: 0.14, peak: 0.8 });
       tone(ctx, out, { f0: 58, f1: 40, t: t + 0.2, dur: 0.18, peak: 0.6 });
       return 0.45;
+    },
+    reverseFreeze(ctx, out, t) {
+      // Reverse swell: noise and a detuned drone rising into a cut.
+      hiss(ctx, out, { t, dur: 2.4, peak: 0.28, attack: 2.3, type: "bandpass", freq: 6000, freq1: 400, q: 0.9 });
+      tone(ctx, out, { type: "sawtooth", f0: 55, f1: 110, t, dur: 2.5, peak: 0.12, attack: 2.2 });
+      tone(ctx, out, { type: "sawtooth", f0: 55.6, f1: 111, t, dur: 2.5, peak: 0.12, attack: 2.2 });
+      return 2.6;
     },
     premiumHit(ctx, out, t) {
       [72, 76, 79, 84, 88].forEach((n, i) => tone(ctx, out, { type: "triangle", f0: midi(n), t: t + i * 0.06, dur: 1.2, peak: 0.12 }));

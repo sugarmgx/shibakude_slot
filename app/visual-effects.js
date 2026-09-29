@@ -62,6 +62,8 @@
     notices?.clear();
     api.battleEnd?.();
     document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow", "cz-final", "last-lamp");
+    document.querySelector(".machine-panel")?.classList.remove("silence-beat", "reel-freeze");
+    document.querySelector(".machine-window")?.classList.remove("reel-flash-blackout", "reel-flash-one", "reel-flash-blink", "reel-flash-fanfare", "lamp-fanfare");
     document.querySelector(".machine-window")?.classList.remove("bell-payout-flash", "baba-sandwich-clear", "baba-bonus-ready-glow", "bonus-confirmed", "bonus-confirm-red", "bonus-confirm-blue", "bonus-confirm-reg", "long-freeze");
     document.querySelector("#effectFlash")?.classList.remove("fire");
   };
@@ -102,12 +104,27 @@
     api.abstractScene?.setTheme(abstractTheme(mode), options);
   }
 
+  // 10: the unko stage warms and intensifies game by game toward the last.
+  function unkoTheme(cz) {
+    const progress = cz?.games ? Math.min(1, Math.max(0, 1 - (cz.gamesLeft - 1) / cz.games)) : 0;
+    const mix = (a, b) => {
+      const ch = (shift) => Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * progress);
+      return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+    };
+    return {
+      primaryColor: mix(0x85949b, 0xd08a3a),
+      secondaryColor: mix(0x4d6472, 0x7a3f1a),
+      emissionIntensity: .8 + progress * .55,
+      effectIntensity: .6 + progress * .7,
+    };
+  }
+
   function syncAbstractStateTheme(mode, state) {
     if (state.mode === "cz") {
       const key = state.cz?.key;
       api.abstractScene?.setTheme({
         ...abstractTheme(mode),
-        ...(key === "unko" ? { primaryColor: 0x85949b, secondaryColor: 0x4d6472, emissionIntensity: .8, effectIntensity: .6 }
+        ...(key === "unko" ? unkoTheme(state.cz)
           : key === "shibaku" ? { primaryColor: 0xe04427, secondaryColor: 0x83c4df, effectIntensity: .65 }
           : { primaryColor: 0xffae30, secondaryColor: 0xda3b23, emissionIntensity: 1 + (state.cz?.babaSandwichHits || 0) * .12 }),
       });
@@ -310,6 +327,12 @@
       sessionInfo.hidden = !payoutMode;
       if (payoutMode) {
         if (state.mode === "bonus") {
+          if (sessionInfo.textContent !== copy.subtitle && sessionInfo.textContent) {
+            // 8: the coin figure hops when it changes.
+            sessionInfo.classList.remove("bump");
+            void sessionInfo.offsetWidth;
+            sessionInfo.classList.add("bump");
+          }
           sessionInfo.textContent = copy.subtitle;
           subtitle.textContent = "";
         } else {
@@ -376,7 +399,7 @@
   // REG bonus: the LCD shows the looped REG movie (muted; the BGM plays on).
   let regMovie = null;
   function syncRegMovie(screen, state) {
-    const on = state.mode === "bonus" && state.bonus?.type === "REG";
+    const on = state.mode === "bonus" && ["REG", "GOLD_REG"].includes(state.bonus?.type);
     if (on && !regMovie) {
       regMovie = document.createElement("video");
       regMovie.className = "lcd-reg-video";
@@ -387,6 +410,10 @@
       regMovie.setAttribute("aria-hidden", "true");
       regMovie.src = "./assets/video/reg-movie.mp4";
       document.querySelector("#lcdStage")?.after(regMovie);
+      const overlay = document.createElement("div");
+      overlay.className = "lcd-reg-fx";
+      overlay.setAttribute("aria-hidden", "true");
+      regMovie.after(overlay);
     }
     if (!regMovie) return;
     screen.classList.toggle("reg-movie", on);
@@ -458,6 +485,9 @@
       const rare = !["miss", "replay", "bell"].includes(role);
       const large = cueRandom() < (hint.held ? .58 : .12) + (rare ? .22 : 0);
       fx(large ? "punchLarge" : "punchSmall");
+      // 11: the enemy takes the hit by its size and staggers when it is going badly for it.
+      if (!["miss", "replay"].includes(role)) api.abstractScene?.cabinetWorld?.enemyHit?.(large ? 1 : .45);
+      api.abstractScene?.cabinetWorld?.enemyStagger?.(Boolean(hint.held));
       if (large) api.abstractScene?.impact?.({ strength: .35, hold: 0, color: 0xffd9a0, rays: .3, disturb: false });
     }
   };
@@ -696,6 +726,7 @@
     }, rushMs);
     schedulePresentation(token, () => {
       screen?.classList.remove("develop-rush", "develop-title");
+      if (ceiling && !reducedMotion.matches) { glass.shatter(); fx("glassBreak2"); }
       api.developing = false;
       api.resultUntil = 0;
       if (api.latestState) api.update(api.latestState);
@@ -715,6 +746,100 @@
     }, total);
     return total;
   };
+
+  // 1: reel backlight patterns. Win / CZ pick a pattern with the
+  // presentation stream; the fanfare has its own.
+  const REEL_FLASH_MS = { blackout: 1300, one: 1300, blink: 1000, fanfare: 1500 };
+  api.reelFlash = (kind = "win") => {
+    const machineWindow = document.querySelector(".machine-window");
+    if (!machineWindow || reducedMotion.matches) return;
+    const pattern = kind === "fanfare" ? "fanfare" : kind === "cz" ? "blink" : ["blackout", "one", "blink"][Math.floor(cueRandom() * 3)];
+    machineWindow.classList.remove("reel-flash-blackout", "reel-flash-one", "reel-flash-blink", "reel-flash-fanfare");
+    void machineWindow.offsetWidth;
+    machineWindow.classList.add(`reel-flash-${pattern}`);
+    scheduleEffect(() => machineWindow.classList.remove(`reel-flash-${pattern}`), REEL_FLASH_MS[pattern]);
+  };
+
+  // 4: a beat of silence (sound is stopped by the caller); the LCD dims and
+  // is held, then comes back with a flash.
+  api.silenceBeat = (ms = 380) => new Promise((resolve) => {
+    const panel = document.querySelector(".machine-panel");
+    const token = holdPresentation(ms);
+    panel?.classList.add("silence-beat");
+    window.setTimeout(() => {
+      panel?.classList.remove("silence-beat");
+      if (token === presentationToken) {
+        api.resultUntil = 0;
+        if (api.latestState) api.update(api.latestState);
+      }
+      resolve();
+    }, ms);
+  });
+
+  // 5: premium reverse freeze. Returns how long the aligned sevens hold (ms).
+  const REVERSE_FREEZE_RATE_ON_WIN = 0.03;
+  api.reverseFreezeRoll = () => !reducedMotion.matches && cueRandom() < REVERSE_FREEZE_RATE_ON_WIN;
+  api.reverseFreeze = () => {
+    notices?.clear();
+    document.querySelector(".machine-panel")?.classList.add("reel-freeze");
+    fx("reverseFreeze");
+    api.abstractScene?.impact?.({ strength: .5, hold: .6, color: 0xffffff, rays: 0, disturb: false });
+    return 1100;
+  };
+  api.reverseFreezeAligned = () => {
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.remove("reel-freeze");
+    panel?.classList.add("notice-premium");
+    document.querySelector(".machine-window")?.classList.add("notice-premium");
+    fx("premiumHit");
+    api.reelFlash("fanfare");
+    flash("hit");
+    api.abstractScene?.impact?.({ strength: 1.2, hold: .05, color: 0xffffff, rays: 1.4 });
+    scheduleEffect(() => {
+      panel?.classList.remove("notice-premium");
+      document.querySelector(".machine-window")?.classList.remove("notice-premium");
+    }, 2600);
+  };
+
+  // 10: the last-game unko win first looks lost (the glass cracks), then
+  // the glass bursts. Returns the hold length (ms).
+  const CZ_REVIVAL_RATE = 0.4;
+  api.czRevivalRoll = () => !reducedMotion.matches && cueRandom() < CZ_REVIVAL_RATE;
+  api.czRevival = () => {
+    const total = 1700;
+    const token = holdPresentation(total);
+    setScreen("lcd-screen mode-challenge battle-loss battle-revival");
+    glass.crack();
+    fx("glassBreak");
+    schedulePresentation(token, () => {
+      glass.shatter();
+      fx("glassBreak2");
+      fx("revival");
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: 1.2, hold: .1, color: 0xffd76a, rays: 1.3 });
+    }, 1150);
+    schedulePresentation(token, () => {
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, total);
+    return total;
+  };
+
+  // 3 / 8: cabinet lamps (and the REG movie overlay) breathe with the BGM kick.
+  let lampLoop = 0, lastKick = -1;
+  function lampSync() {
+    lampLoop = requestAnimationFrame(lampSync);
+    const state = api.latestState;
+    const on = ["bonus", "at", "tama", "bt"].includes(state?.mode) && !reducedMotion.matches;
+    const machineWindow = document.querySelector(".machine-window");
+    machineWindow?.classList.toggle("lamp-sync", on);
+    const music = api.abstractScene?.music;
+    const kick = on && music ? Math.min(1, (music.kick || 0) * (music.active || 0)) : 0;
+    if (Math.abs(kick - lastKick) < 0.01) return;
+    lastKick = kick;
+    document.documentElement.style.setProperty("--lamp-kick", kick.toFixed(3));
+  }
+  lampLoop = requestAnimationFrame(lampSync);
 
   // C8: each CZ tightens toward its last game; the last game darkens and shakes.
   const CZ_BUILD_COLORS = { unko: 0x9fb0bb, baba: 0xffb43b, shibaku: 0xff5a2a };
@@ -741,6 +866,12 @@
     const className = bonusType === "BLUE_BIG" ? "bonus-confirm-blue" : bonusType === "RED_BIG" ? "bonus-confirm-red" : "bonus-confirm-reg";
     screen?.classList.add("bonus-confirmed", className);
     machineWindow?.classList.add("bonus-confirmed", className);
+    // 9: LCD, lamps and reels go off together on the fanfare.
+    api.reelFlash("fanfare");
+    machineWindow?.classList.remove("lamp-fanfare");
+    void machineWindow?.offsetWidth;
+    machineWindow?.classList.add("lamp-fanfare");
+    scheduleEffect(() => machineWindow?.classList.remove("lamp-fanfare"), 1700);
     api.burst = 3;
     api.abstractScene?.pulse(2.8);
     api.abstractScene?.impact?.({
@@ -786,6 +917,8 @@
       api.clearBabaThirdHit();
       api.resultUntil = 0;
       if (api.latestState) api.update(api.latestState);
+      // 6: the LCD glass bursts as the light comes back.
+      if (!reducedMotion.matches) { glass.shatter(); fx("glassBreak2"); }
       flash("hit");
       api.abstractScene?.impact?.({ strength: .9, hold: .04, color: 0xffd84a, rays: 1 });
       document.querySelector(".machine-window")?.classList.add("baba-bonus-ready-glow");
