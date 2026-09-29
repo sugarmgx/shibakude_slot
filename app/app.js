@@ -3158,6 +3158,10 @@ function selectSpecialControlledCandidate(reelIndex, pending, controlTables, sto
     choices = indexedControlChoices(controlTables, desiredRoleKey, reelIndex, fixedStops, allStops);
     if (isBonusReady || isCzBonusEntry || isBTBonus) choices = middleLineOnly(choices);
   }
+  // 強制停止役（BAR揃い等）でも、挟み目非成立Gは左リールにBAR・リプレイ・BARを出さない
+  if (reelIndex === 0 && !isBabaSandwich && shouldRejectBabaSandwich(pending)) {
+    choices = choices.filter(([targetStop]) => !isBabaSandwichWindow(targetStop));
+  }
   if (!choices.length) return null;
 
   const distanceMap = displayRoleKey === "miss" ? reachable.stops : allStops;
@@ -3189,6 +3193,19 @@ function selectSpecialControlledCandidate(reelIndex, pending, controlTables, sto
   return targetStop;
 }
 
+// C1: ババアCZの挟み目成立G以外では、通常時も左リールのBAR・リプレイ・BAR挟み目を表示しない
+function shouldRejectBabaSandwich(pending) {
+  const babaFlagNotSet = state.mode === "cz"
+    && state.cz?.key === "baba"
+    && !pending.afterState.cz?.babaSandwichHitThisGame;
+  return babaFlagNotSet || state.mode === "normal";
+}
+
+function isBabaSandwichWindow(targetStop) {
+  const rows = visibleWindowFromStop(0, targetStop);
+  return BABA_SANDWICH_SYMBOLS.every((symbol, rowIndex) => rows[rowIndex] === symbol);
+}
+
 function selectControlledCandidate(reelIndex) {
   const pending = ui.pendingSpin;
   if (!pending || !ui.spinningReels[reelIndex]) {
@@ -3205,13 +3222,9 @@ function selectControlledCandidate(reelIndex) {
   const fixedStops = new Map(stoppedReels.map((index) => [index, pending.afterState.reelStops[index]]));
 
   const remainingOrder = pending.stopOrder.slice(pending.nextStop + 1);
-  const babaFlagNotSet = state.mode === "cz"
-    && state.cz?.key === "baba"
-    && !pending.afterState.cz?.babaSandwichHitThisGame;
-  // C1: ババアCZの挟み目成立G以外では、通常時も左リールのBAR・リプレイ・BAR挟み目を表示しない
-  const normalModeSandwichReject = state.mode === "normal";
+  const rejectBabaSandwich = shouldRejectBabaSandwich(pending);
   const decision = decideRoleAwareStop({
-    controlTables: babaFlagNotSet || normalModeSandwichReject ? normalControlTables : controlTables,
+    controlTables: rejectBabaSandwich ? normalControlTables : controlTables,
     policyRoleKey: pending.presentationRoleKey,
     displayRoleKey: pending.displayRoleKey,
     missedRoleKey: pending.afterState.displayMissedRole,
@@ -3220,7 +3233,7 @@ function selectControlledCandidate(reelIndex) {
     remainingOrder,
     reachableStops: reachable.stops,
     preferBottomBar: reelIndex === 0 && !state.auto,
-    rejectBabaSandwich: babaFlagNotSet || normalModeSandwichReject,
+    rejectBabaSandwich,
   });
 
   if (decision.noSafeStop) {
