@@ -481,10 +481,12 @@
         if (!button) return;
         button.getAnimations({subtree:true}).forEach(animation => animation.cancel());
         // The housing stays fixed: only the lever shaft/ball or lens travels.
-        const timing={duration:kind === "lever" ? 240 : 150,easing:"cubic-bezier(.2,.8,.3,1)"};
+        const timing={duration:kind === "lever" ? 420 : 150,easing:kind === "lever" ? "linear" : "cubic-bezier(.2,.8,.3,1)"};
         if(kind === "lever") {
-          button.animate([{transform:"rotate(-12deg)"},{transform:"rotate(10deg)",offset:.3},{transform:"rotate(-14deg)",offset:.8},{transform:"rotate(-12deg)"}],{...timing,pseudoElement:"::before"});
-          button.animate([{transform:"none"},{transform:"translate(18px,7px) rotate(12deg)",offset:.3},{transform:"translate(-2px,-1px)",offset:.8},{transform:"none"}],{...timing,pseudoElement:"::after"});
+          // Pulled down, released: the spring overshoots twice before it settles.
+          const swing=[0,1,-.42,.2,-.08,0], at=[0,.18,.42,.62,.82,1];
+          button.animate(swing.map((k,i)=>({transform:`rotate(${-12+22*k}deg)`,offset:at[i],easing:i===0?"cubic-bezier(.3,0,.7,1)":"cubic-bezier(.3,.6,.4,1)"})),{...timing,pseudoElement:"::before"});
+          button.animate(swing.map((k,i)=>({transform:`translate(${18*k}px,${7*k}px) rotate(${12*k}deg)`,offset:at[i],easing:i===0?"cubic-bezier(.3,0,.7,1)":"cubic-bezier(.3,.6,.4,1)"})),{...timing,pseudoElement:"::after"});
         } else {
           for(const pseudoElement of ["::before","::after"])button.animate([{transform:"none"},{transform:"translateY(4px) scale(.96)",offset:.25},{transform:"none"}],{...timing,pseudoElement});
         }

@@ -685,6 +685,9 @@
           // The cabinet has a final optical layer shared with DOM lettering.
           // Standalone scene previews retain the shader's native LCD mask.
           uPanelFx: { value: this.host.closest('.lcd-screen')?.querySelector('.lcd-post-fx') ? 0 : 1 },
+          uFocus: { value: 0.12 },
+          uFocusRange: { value: 0.35 },
+          uDof: { value: 0 },
         },
         vertexShader: `
           varying vec2 vUv;
@@ -707,6 +710,9 @@
           uniform float uCut;
           uniform float uClarity;
           uniform float uPanelFx;
+          uniform float uFocus;
+          uniform float uFocusRange;
+          uniform float uDof;
 
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float rect(vec2 p, vec2 center, vec2 size) {
@@ -763,6 +769,20 @@
             vec2 pixelizedUv = (floor(panelUv) + 0.5) / panelResolution;
             vec2 contentUv = mix(uv, mix(pixelizedUv, uv, removePixels), uPanelFx);
             vec3 color = texture2D(uTexture, contentUv).rgb;
+            // Depth of field: the background past the focus plane melts into a
+            // soft disc blur so foreground structure and lettering stand out.
+            float dofDepth = linearDepth(texture2D(uDepth, uv).r);
+            float coc = clamp((dofDepth - uFocus) / max(0.001, uFocusRange), 0.0, 1.0) * uDof;
+            if (coc > 0.02) {
+              vec2 radius = coc * 5.5 / safeResolution;
+              vec3 blurred = color;
+              for (int i = 0; i < 10; i++) {
+                float angle = float(i) * 2.39996 + 0.4;
+                float ring = mix(0.45, 1.0, mod(float(i), 2.0));
+                blurred += texture2D(uTexture, clamp(contentUv + vec2(cos(angle), sin(angle)) * ring * radius, vec2(0.001), vec2(0.999))).rgb;
+              }
+              color = blurred / 11.0;
+            }
             float maskVisibility = (1.0 - removePixels) * 0.22 * uPanelFx;
             vec3 lcdMask = mix(vec3(1.0), lcdSubpixelMask(panelUv), maskVisibility);
             color *= lcdMask;
@@ -935,6 +955,13 @@
           uContrast: { value: 0 },
           uTint: { value: new THREE.Vector3(1, 1, 1) },
           uPulse: { value: 0 },
+          uStreak: { value: null },
+          uAnamorphic: { value: 0.3 },
+          uFloor: { value: 0 },
+          uTime: { value: 0 },
+          uPrev: { value: null },
+          uWipe: { value: 1 },
+          uWipeType: { value: 0 },
         },
         vertexShader,
         fragmentShader: `
@@ -959,6 +986,14 @@
           uniform float uContrast;
           uniform vec3 uTint;
           uniform float uPulse;
+          uniform sampler2D uStreak;
+          uniform float uAnamorphic;
+          uniform float uFloor;
+          uniform float uTime;
+          uniform sampler2D uPrev;
+          uniform float uWipe;
+          uniform float uWipeType;
+          float hash12(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
 
           vec3 sampleScene(vec2 uv) { return texture2D(uScene, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
           vec3 sampleBloom(vec2 uv) { return texture2D(uBloom, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
@@ -993,6 +1028,24 @@
             graded = graded * graded * (3.0 - 2.0 * graded);
             color = mix(color, graded, uContrast) * uTint * (1.0 + uPulse);
             color += sampleBloom(warped) * uBloomStrength;
+            // Anamorphic flare: bright points stretch into thin horizontal streaks.
+            vec3 streak = vec3(0.0);
+            for (int i = -7; i <= 7; i++) {
+              float fi = float(i);
+              streak += texture2D(uStreak, clamp(warped + vec2(fi * 0.021, 0.0), vec2(0.0005), vec2(0.9995))).rgb * exp(-abs(fi) * 0.3);
+            }
+            streak *= 0.15;
+            float streakLuma = dot(streak, vec3(0.3, 0.5, 0.2));
+            color += mix(vec3(0.55, 0.78, 1.0) * streakLuma, streak, 0.4) * uAnamorphic;
+            // Glossy floor: the lower band mirrors the tunnel above it.
+            if (uFloor > 0.001) {
+              float horizon = 0.32;
+              float below = horizon - vUv.y;
+              if (below > 0.0) {
+                vec2 mirror = vec2(warped.x + sin(vUv.y * 140.0 + uTime * 2.0) * 0.0015, horizon + below * 1.2);
+                color += sampleScene(mirror) * (1.0 - smoothstep(0.0, horizon, below)) * 0.2 * uFloor;
+              }
+            }
             if (uRays > 0.001) {
               vec3 rays = vec3(0.0);
               vec2 stepUv = (warped - uCenter) * 0.055;
@@ -1011,6 +1064,38 @@
             float column = exp(-pow((vUv.x - uStop.x) / 0.075, 2.0)) * uStop.z * exp(-uStop.y * 7.0);
             color += color * column * 0.32 + vec3(1.0, 0.96, 0.9) * column * 0.035;
             color += mix(vec3(1.0), uImpactColor, 0.35) * uFlash;
+            // Scene-change wipe over the last frame of the previous scene.
+            if (uWipe < 0.999) {
+              float p = uWipe;
+              float reveal = 1.0;
+              float edge = 0.0;
+              vec2 prevUv = vUv;
+              if (uWipeType < 0.5) {
+                float slats = 9.0;
+                float slat = floor(vUv.y * slats);
+                float local = abs(fract(vUv.y * slats) - 0.5) * 2.0;
+                float open = p * 1.35 - hash12(vec2(slat, 3.0)) * 0.3;
+                reveal = step(local, open);
+                edge = (1.0 - smoothstep(0.0, 0.06, abs(local - open))) * (1.0 - p);
+              } else if (uWipeType < 1.5) {
+                vec2 grid = vec2(16.0, 5.0);
+                vec2 cell = floor(vUv * grid);
+                vec2 cellCentre = (cell + 0.5) / grid;
+                float delay = hash12(cell) * 0.35 + length((cellCentre - 0.5) * vec2(1.6, 1.0)) * 0.45;
+                float t = clamp((p - delay) / 0.4, 0.0, 1.0);
+                reveal = step(0.999, t);
+                prevUv = cellCentre + (vUv - cellCentre) * (1.0 + t * 0.35) + vec2((hash12(cell + 7.0) - 0.5) * t * 0.08, -t * t * 0.28);
+                vec2 inCell = abs(fract(vUv * grid) - 0.5);
+                edge = (1.0 - smoothstep(0.44, 0.5, max(inCell.x, inCell.y))) < 0.5 ? (1.0 - p) * 0.8 : 0.0;
+              } else {
+                float line = vUv.x + (vUv.y - 0.5) * 0.35;
+                float front = p * 1.5 - 0.25;
+                reveal = step(line, front);
+                edge = 1.0 - smoothstep(0.0, 0.025, abs(line - front));
+              }
+              vec3 previous = texture2D(uPrev, clamp(prevUv, vec2(0.0005), vec2(0.9995))).rgb;
+              color = mix(previous, color, reveal) + vec3(1.0, 0.95, 0.88) * edge * 0.6;
+            }
             gl_FragColor = vec4(shoulder(color), 1.0);
           }
         `,
@@ -1039,8 +1124,23 @@
     boardBeat(kind, reelIndex = 0) {
       const now = performance.now();
       this.board ||= {};
-      if (kind === "lever") this.board.rippleAt = now;
-      else if (kind === "stop") { this.board.stopAt = now; this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5; }
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (kind === "lever") {
+        this.board.rippleAt = now;
+        this.board.stops = 0;
+        this.cutTarget = null;
+      } else if (kind === "stop") {
+        this.board.stopAt = now;
+        this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5;
+        this.board.stops = (this.board.stops || 0) + 1;
+        if (this.board.stops === 3 && !reduced) {
+          // Third stop: the picture holds for a beat, then hard-cuts to a new angle.
+          this.freezeUntil = now + 130;
+          const side = Math.random() < 0.5 ? -1 : 1;
+          this.cutTarget = new this.THREE.Vector3(side * (0.8 + Math.random() * 0.7), (Math.random() - 0.4) * 0.5, -0.6 - Math.random() * 0.8);
+          this.cutOffset = this.cutTarget.clone();
+        }
+      }
       this.atmosphere?.board(kind);
     }
 
@@ -1070,7 +1170,7 @@
       const uniforms = this.impactMaterial.uniforms;
       const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       const weights = this.presentationWeights;
-      let bloom = 0.1 * weights.normal + 0.16 * weights.challenge + 0.22 * weights.bonus + 0.2 * weights.boost
+      let bloom = 0.1 * weights.normal + 0.15 * weights.challenge + 0.15 * weights.bonus + 0.17 * weights.boost
         + this.eventPulse * 0.02;
       let hold = 0, zoom = 1, flash = 0, rays = 0, age = 99, strength = 0, shake = 0;
       const fx = this.impactFx;
@@ -1108,6 +1208,16 @@
       uniforms.uContrast.value = grade ? grade.contrast : 0;
       if (grade) uniforms.uTint.value.copy(grade.tint);
       uniforms.uPulse.value = kick * 0.05;
+      uniforms.uTime.value = now / 1000;
+      uniforms.uAnamorphic.value = 0.22 * weights.normal + 0.26 * weights.challenge + 0.24 * weights.bonus + 0.3 * weights.boost
+        + (fx && fx.released ? fx.strength * 0.5 * Math.exp(-age * 2.5) : 0) + kick * 0.12;
+      uniforms.uFloor.value = weights.bonus;
+      const wipeAge = this.wipe ? (now - this.wipe.at) / 1000 : 99;
+      uniforms.uWipe.value = reduced ? 1 : clamp(wipeAge / 0.55, 0, 1);
+      if (this.wipe) uniforms.uWipeType.value = this.wipe.type;
+      const display = this.displayMaterial.uniforms;
+      display.uDof.value = reduced ? 0 : 0.45 * weights.normal + 0.6 * weights.challenge + 0.75 * weights.bonus + 0.5 * weights.boost;
+      display.uFocus.value = 0.1 * weights.normal + 0.09 * weights.challenge + 0.06 * weights.bonus + 0.08 * weights.boost;
       if (reduced) { zoom = 1; shake = 0; flash *= 0.4; uniforms.uRipple.value.y = 0; }
       uniforms.uWarp.value = reduced ? 0 : 1;
       uniforms.uBloomStrength.value = bloom;
@@ -1150,8 +1260,58 @@
       this.fxQuad.material = this.impactMaterial;
       this.impactMaterial.uniforms.uScene.value = this.compositeTarget.texture;
       this.impactMaterial.uniforms.uBloom.value = this.bloomTargets[0].texture;
+      this.impactMaterial.uniforms.uStreak.value = this.bloomTargets[2].texture;
+      this.impactMaterial.uniforms.uPrev.value = this.transitionTarget.texture;
       renderer.setRenderTarget(null);
       renderer.render(this.fxScene, this.postCamera);
+      this.sampleGlow(now);
+    }
+
+    // Colour the cabinet lamps with the light the panel is actually emitting:
+    // a tiny left / centre / right read of the bloom chain every few frames.
+    sampleGlow(now) {
+      if (now - (this.glowSampledAt || 0) < 90) return;
+      this.glowSampledAt = now;
+      const renderer = this.renderer;
+      this.fxQuad.material = this.bloomDownMaterial;
+      const source = this.bloomTargets[3];
+      this.bloomDownMaterial.uniforms.uTexture.value = source.texture;
+      this.bloomDownMaterial.uniforms.uTexel.value.set(1 / source.width, 1 / source.height);
+      this.bloomDownMaterial.uniforms.uPrefilter.value = 0;
+      renderer.setRenderTarget(this.glowTarget);
+      renderer.render(this.fxScene, this.postCamera);
+      renderer.setRenderTarget(null);
+      this.fxQuad.material = this.impactMaterial;
+      try { renderer.readRenderTargetPixels(this.glowTarget, 0, 0, 8, 2, this.glowPixels); } catch (_) { return; }
+      const px = this.glowPixels, base = this.theme.primary;
+      const zone = (from, to) => {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let y = 0; y < 2; y += 1) for (let x = from; x < to; x += 1) { const i = (y * 8 + x) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n += 1; }
+        const k = 2.6 / n;
+        return [r * k + base.r * 46, g * k + base.g * 46, b * k + base.b * 46].map(v => Math.round(clamp(v, 0, 255)));
+      };
+      const root = document.documentElement.style;
+      const left = zone(0, 3), centre = zone(3, 5), right = zone(5, 8);
+      const level = clamp((centre[0] + centre[1] + centre[2]) / 420, 0.15, 1);
+      root.setProperty("--glow-l", left.join(" "));
+      root.setProperty("--glow-c", centre.join(" "));
+      root.setProperty("--glow-r", right.join(" "));
+      root.setProperty("--glow-i", level.toFixed(3));
+    }
+
+    captureTransition(type) {
+      if (!this.transitionTarget || !this.compositeTarget) return;
+      const renderer = this.renderer;
+      const previousTarget = renderer.getRenderTarget();
+      this.fxQuad.material = this.bloomDownMaterial;
+      this.bloomDownMaterial.uniforms.uTexture.value = this.compositeTarget.texture;
+      this.bloomDownMaterial.uniforms.uTexel.value.set(0.25 / this.compositeTarget.width, 0.25 / this.compositeTarget.height);
+      this.bloomDownMaterial.uniforms.uPrefilter.value = 0;
+      renderer.setRenderTarget(this.transitionTarget);
+      renderer.render(this.fxScene, this.postCamera);
+      renderer.setRenderTarget(previousTarget);
+      this.fxQuad.material = this.impactMaterial;
+      this.wipe = { at: performance.now(), type };
     }
 
     makeRenderTarget(width, height, depthBuffer = false) {
@@ -1206,6 +1366,9 @@
           ));
         }
         this.impactMaterial.uniforms.uResolution.value.set(fullWidth, fullHeight);
+        this.transitionTarget = this.makeFxTarget(fullWidth, fullHeight);
+        this.glowTarget = this.makeRenderTarget(8, 2);
+        this.glowPixels = new Uint8Array(8 * 2 * 4);
         this.clearFeedback();
       }
     }
@@ -1237,6 +1400,9 @@
     setPresentation(kind = "normal", variant = 0, options = {}) {
       const nextKind = PRESENTATION_KEYS.includes(kind) ? kind : "normal";
       const changed = this.presentation.kind !== nextKind || this.presentation.variant !== variant;
+      if (this.presentation.kind !== nextKind && !options.immediate) {
+        this.captureTransition(nextKind === "challenge" ? 0 : nextKind === "bonus" ? 1 : 2);
+      }
       this.presentation = { kind: nextKind, variant: Number(variant) || 0 };
       PRESENTATION_KEYS.forEach((key) => {
         this.presentationTargets[key] = key === nextKind ? 1 : 0;
@@ -1553,9 +1719,12 @@
 
     renderFrame(now) {
       if (!this.running || this.disposed) return;
-      const dt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
+      const frozen = Boolean(this.freezeUntil && now < this.freezeUntil);
+      const frameDt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
+      if (frozen) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000;
+      const dt = frozen ? 0.0001 : frameDt;
       this.previousAt = now;
-      const runningTime = (now - this.startedAt) / 1000;
+      const runningTime = (now - this.startedAt - (this.frozenMs || 0)) / 1000;
       if (!this.cabinetWorld?.waiting) this.battleHeldTime = null;
       else if (this.battleHeldTime == null) this.battleHeldTime = runningTime;
       const elapsed = this.battleHeldTime ?? runningTime;
@@ -1602,6 +1771,12 @@
       const dynamics = this.options.getDynamics?.();
       if (dynamics) this.setEnergy(dynamics.intensity, dynamics.burst);
       this.updateCamera(phase, quiet ? elapsed * .03 : elapsed);
+      if (this.cutOffset) {
+        // Hard cut in on the third stop, ease back out after the next lever.
+        if (!this.cutTarget) this.cutOffset.multiplyScalar(Math.exp(-dt * 3));
+        this.camera.position.add(this.cutOffset);
+        if (this.cutOffset.lengthSq() < 0.0004 && !this.cutTarget) this.cutOffset = null;
+      }
       const visual = this.updateWorld(phase, quiet ? elapsed * .03 : elapsed, quiet ? dt * .03 : dt);
       // Distinct room silhouettes must not be obscured by the station's abstract rails/veils.
       this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));

@@ -1,0 +1,193 @@
+/* Cabinet shell: one machine standing in a parlor. Loaded last; every rule is
+   scoped to html.cab so the unit keeps its design size at any window size
+   (cabinet-shell.js scales the whole unit to fit). Surfaces come from the
+   textures in assets/textures/cabinet, light from the LCD (--glow-*). */
+:root {
+  --glow-l: 150 170 190; --glow-c: 150 170 190; --glow-r: 150 170 190; --glow-i: .3;
+  --cab-metal: url('../assets/textures/cabinet/brushed-metal.png');
+  --cab-grain: url('../assets/textures/cabinet/plastic-grain.png');
+  --cab-silk: #aeb6ba;
+}
+
+/* ---------- Stage ---------- */
+html.cab, html.cab body { height: 100%; overflow: hidden; }
+html.cab body { margin: 0; background: #030405; }
+html.cab .parlor {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: url('../assets/textures/cabinet/parlor.jpg') center / cover no-repeat, #030405;
+}
+html.cab .parlor::after {
+  content: ""; position: absolute; left: 50%; bottom: 0; width: 70vw; height: 30vh; transform: translateX(-50%);
+  background: radial-gradient(ellipse at 50% 0, rgb(var(--glow-c) / calc(var(--glow-i) * .35)), transparent 70%);
+  transition: background 200ms linear;
+}
+html.cab .app-shell {
+  position: absolute; left: 50%; top: 0; z-index: 1; width: 1480px; margin: 0; padding: 12px 0 8px;
+  transform-origin: top center;
+}
+
+/* ---------- Island data counter (separate unit above the machine) ---------- */
+html.cab .topbar.data-counter {
+  position: relative; width: 1180px; height: 84px; margin: 0 auto 26px; padding: 8px 20px;
+  border: 0; border-radius: 6px;
+  background: linear-gradient(#0c0f12, #050708), var(--cab-grain);
+  background-blend-mode: normal, overlay;
+  box-shadow: 0 0 0 2px #2a3136, 0 0 0 4px #0b0e10, 0 0 0 5px #59646b66, 0 14px 30px #000c;
+}
+html.cab .topbar.data-counter::after {
+  content: ""; position: absolute; left: 50%; bottom: -24px; width: 120px; height: 22px; transform: translateX(-50%);
+  background: linear-gradient(90deg, #15191c, #4b555b 30%, #1b2024 50%, #3f484e 70%, #121517);
+  clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
+}
+
+/* ---------- Cabinet body ---------- */
+html.cab .machine-panel {
+  position: relative; margin: 0; padding: 0 40px; border: 0; border-radius: 22px 22px 6px 6px;
+  background:
+    linear-gradient(90deg, #0008, transparent 6%, transparent 94%, #0008),
+    linear-gradient(#1d252bee, #0e1418f2 40%, #151c21f2),
+    var(--cab-metal) center / 512px 256px;
+  box-shadow: inset 0 1px #c9d4da55, inset 0 -3px #000, 0 0 0 1px #05080a, 0 30px 60px #000e, 0 0 90px rgb(var(--glow-c) / calc(var(--glow-i) * .18));
+}
+html.cab .machine-panel::before, html.cab .machine-panel::after { content: none; }
+
+/* Top lamp */
+html.cab .cabinet-marquee { display: block; height: 76px; padding: 12px 0 10px; margin: 0; background: none; }
+html.cab .cabinet-marquee .toplamp { width: 100%; }
+html.cab .toplamp {
+  position: relative; height: 100%; display: flex; align-items: center; justify-content: center; gap: 18px;
+  border-radius: 14px 14px 4px 4px; overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 140% at 50% 120%, rgb(var(--glow-c) / calc(.2 + var(--glow-i) * .45)), transparent 70%),
+    linear-gradient(#0a0e11, #030506);
+  box-shadow: inset 0 0 0 1px #6e7b8266, inset 0 2px #ffffff22, inset 0 -8px 16px #000a, 0 2px 0 #000;
+  transition: background 200ms linear;
+}
+html.cab .toplamp::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg, #ffffff0d 0 1px, transparent 1px 5px);
+}
+html.cab .toplamp-word {
+  font: 800 34px/1 var(--font-display); font-style: italic; letter-spacing: .06em;
+  color: transparent; background: linear-gradient(#ffffff, #d7dde0 40%, #6b777e 52%, #eef3f5 58%, #9aa6ac);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 0 10px rgb(var(--glow-c) / .55)) drop-shadow(0 2px 0 #000);
+}
+html.cab .toplamp-badge {
+  padding: 5px 14px 4px; font: 800 22px/1 var(--font-display); font-style: italic; color: #1a0d02;
+  background: linear-gradient(#fff3c8, #ffb43b 55%, #b8660d); clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+  box-shadow: 0 0 16px #ffb43b88;
+}
+
+/* Side lamps: acrylic light pipes fed by the LCD */
+html.cab .side-lamp {
+  position: absolute; top: 90px; bottom: 150px; width: 14px; z-index: 3; pointer-events: none; border-radius: 7px;
+  box-shadow: inset 0 0 0 2px #0a0e11, 0 0 0 1px #6e7b82aa;
+  transition: background 180ms linear, box-shadow 180ms linear;
+}
+html.cab .side-lamp.is-left { left: 13px; background: repeating-linear-gradient(transparent 0 9px, #0008 9px 11px), linear-gradient(rgb(var(--glow-l) / .95), rgb(var(--glow-l) / .55)); box-shadow: inset 0 0 0 2px #0a0e11, 0 0 0 1px #6e7b82aa, 0 0 22px rgb(var(--glow-l) / calc(var(--glow-i) * .9)); }
+html.cab .side-lamp.is-right { right: 13px; background: repeating-linear-gradient(transparent 0 9px, #0008 9px 11px), linear-gradient(rgb(var(--glow-r) / .95), rgb(var(--glow-r) / .55)); box-shadow: inset 0 0 0 2px #0a0e11, 0 0 0 1px #6e7b82aa, 0 0 22px rgb(var(--glow-r) / calc(var(--glow-i) * .9)); }
+
+/* LCD bezel */
+html.cab .machine-panel > .lcd-screen {
+  height: 300px; margin: 0; border: 0; border-radius: 4px;
+  box-shadow: 0 0 0 8px #050709, 0 0 0 9px #7d8a91aa, 0 0 0 11px #0a0e11, inset 0 10px 18px #000c;
+}
+html.cab .push-bridge, html.cab .push-bridge.is-trim {
+  height: 14px; margin: 12px -40px 0; border: 0; display: block;
+  background: linear-gradient(#030507, #5a676e 30%, #e3ebee 45%, #4c5a61 60%, #0a0f13);
+}
+
+/* Reel bay: speakers + reel window */
+html.cab .reel-bay { display: grid; grid-template-columns: 1fr 1040px 1fr; align-items: center; padding: 14px 0 12px; }
+html.cab .reel-bay .machine-window { width: 1040px; max-width: none; margin: 0; box-shadow: inset 0 12px 22px -8px rgb(var(--glow-c) / .35), inset 0 10px 12px #000, 0 0 0 3px #0b1011, 0 0 0 4px #9aa6ac66; }
+html.cab .cabinet-speaker {
+  justify-self: center; width: 132px; height: 250px; border-radius: 26px;
+  background: radial-gradient(ellipse at 50% 30%, #ffffff10, transparent 60%), url('../assets/textures/cabinet/speaker-grille.png') center / 20px 34px;
+  box-shadow: inset 0 0 0 2px #05080a, inset 0 10px 18px #000c, 0 0 0 5px #20282d, 0 0 0 6px #aab5bb77, 0 0 0 9px #0b0f12, 0 0 26px rgb(var(--glow-c) / calc(var(--glow-i) * .25));
+}
+
+/* ---------- Deck ---------- */
+html.cab .cabinet-console {
+  display: grid; grid-template-areas: "center" "service"; margin: 0 -40px; padding: 16px 40px 10px;
+  border-radius: 0; clip-path: none;
+  background: linear-gradient(#b9c4c8 0, #3b474d 2px, #11181c 5px, #182127 40%, #0b1115), var(--cab-metal) center / 512px 256px;
+  background-blend-mode: multiply;
+  box-shadow: inset 0 -2px #000, 0 -4px 10px #0009;
+}
+html.cab .deck-left { position: absolute; left: 70px; top: 16px; display: flex; align-items: flex-start; gap: 26px; z-index: 4; }
+html.cab .deck-left .lever-bay { position: static; transform: none; width: 98px; }
+html.cab .bet-bay { padding-top: 34px; }
+html.cab #maxBetButton { position: static; width: 96px; height: 42px; font-size: 13px; }
+html.cab .cabinet-console .stop-panel { width: 1040px; }
+html.cab .cabinet-console .stop-button { width: 76px; height: 76px; }
+html.cab .cabinet-console .stop-button:not(:disabled) {
+  box-shadow: 0 0 0 3px #070b0e, 0 0 0 7px #3aa7ff, 0 0 20px #3aa7ffaa, 0 5px #000, 0 9px 12px #000b;
+}
+html.cab .cabinet-console .stop-button:disabled {
+  box-shadow: 0 0 0 3px #070b0e, 0 0 0 7px #16232c, 0 5px #000, 0 9px 12px #000b;
+}
+html.cab .segment-bank { top: 12px; right: 52px; width: 205px; }
+
+/* Service row: switches | speeds | PUSH dome | cross key | DATA MENU DEBUG */
+html.cab .console-service {
+  width: 1100px; margin: 12px auto 0; padding-top: 10px;
+  grid-template-columns: auto auto 1fr auto auto; grid-template-rows: 104px; gap: 0 30px; align-items: center;
+}
+html.cab .service-switches { grid-area: 1 / 1; }
+html.cab .service-speeds { grid-area: 1 / 2; }
+html.cab .push-bay { grid-area: 1 / 3; justify-self: center; }
+html.cab .dpad-bay { grid-area: 1 / 4; }
+html.cab .cabinet-nav { grid-area: 1 / 5; }
+
+/* PUSH dome */
+html.cab #battlePushButton {
+  position: relative; width: 100px; height: 100px; padding: 0; border: 0; border-radius: 50%; clip-path: none; transform: none;
+  background: conic-gradient(from 20deg, #1a242a, #9aa8ae 30deg, #f2f6f5 48deg, #5b6970 70deg, #121a1f 130deg, #75848b 210deg, #eef3f2 232deg, #394750 270deg, #1a242a);
+  box-shadow: 0 0 0 3px #05080a, 0 6px 0 #020405, 0 10px 16px #000c;
+  animation: none; filter: none;
+}
+html.cab #battlePushButton span {
+  position: absolute; inset: 9px; display: grid; place-items: center; border-radius: 50%;
+  font: 800 19px/1 var(--font-display); letter-spacing: .08em; color: #7d8a91;
+  background: radial-gradient(circle at 38% 28%, #6c7a82, #1f2a31 45%, #0a1014 80%);
+  box-shadow: inset 0 3px 6px #ffffff33, inset 0 -8px 12px #000b; clip-path: none;
+}
+html.cab #battlePushButton.is-ready {
+  box-shadow: 0 0 0 3px #05080a, 0 0 0 8px #ffb43b, 0 0 34px #ffb43bcc, 0 6px 0 #020405;
+  animation: cabPushRing 700ms ease-in-out infinite alternate;
+}
+html.cab #battlePushButton.is-ready span {
+  color: #3a1d00; text-shadow: 0 1px #fff6; background: radial-gradient(circle at 38% 28%, #fffbe8, #ffd166 40%, #e08a12 75%, #7a3d05);
+}
+html.cab #battlePushButton:active:not(:disabled) { transform: translateY(3px); }
+@keyframes cabPushRing { to { box-shadow: 0 0 0 3px #05080a, 0 0 0 8px #fff0c2, 0 0 48px #ffc257, 0 6px 0 #020405; } }
+
+/* ---------- Waist panel: printed art + pay table ---------- */
+html.cab .cabinet-waist {
+  display: grid; grid-template-columns: 1fr 600px; align-items: center; gap: 30px;
+  height: 118px; margin: 0 -40px; padding: 0 60px; border-radius: 0 0 6px 6px;
+  background:
+    linear-gradient(100deg, transparent 0 18%, #ffffff0c 19%, transparent 26%),
+    linear-gradient(120deg, #3a0508 0%, #0b0406 28%, #04070c 52%, #04142e 78%, #020a18 100%);
+  box-shadow: inset 0 2px #ffffff26, inset 0 0 0 1px #000, inset 0 -10px 20px #000a;
+}
+html.cab .waist-art { display: flex; align-items: baseline; gap: 14px; overflow: hidden; }
+html.cab .waist-word {
+  font: 800 46px/1 var(--font-display); font-style: italic; letter-spacing: .02em; white-space: nowrap;
+  color: transparent; -webkit-text-stroke: 1.5px #ffffff55; text-shadow: 0 0 22px #ff3b3033;
+}
+html.cab .waist-mark { font: 800 40px/1 var(--font-display); font-style: italic; color: #ffb43b; text-shadow: 0 0 18px #ffb43b66; }
+html.cab .pay-table {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 26px; position: relative;
+  padding: 10px 16px 18px; border: 1px solid #ffffff2a; border-radius: 3px; background: #00000059;
+}
+html.cab .pay-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #ffffff14; }
+html.cab .pay-symbols { display: flex; gap: 3px; }
+html.cab .pay-symbols img { width: 30px; height: 22px; object-fit: contain; filter: drop-shadow(0 1px 1px #000); }
+html.cab .pay-value { font: 800 13px/1 var(--font-display); color: #f1eee4; letter-spacing: .04em; white-space: nowrap; }
+html.cab .pay-value small { font-size: 10px; margin-left: 2px; color: var(--cab-silk); }
+html.cab .pay-note { position: absolute; right: 12px; bottom: 3px; margin: 0; font: 700 9px/1 var(--font-ui); letter-spacing: .12em; color: var(--cab-silk); }
+
+/* Printed legends only: no web-style labels on the housing. */
+html.cab .hardware-label { display: none; }

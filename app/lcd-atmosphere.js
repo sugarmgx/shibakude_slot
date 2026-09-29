@@ -61,19 +61,19 @@
   // each reads at a glance; bonus / boost keep the tunnel travel direction.
   const PROFILES = {
     station: { fog: 0.5, fogColor: 0x6b8aa0, beams: 0.5, beamColor: 0xd6ecff, beamSwing: 0.04, beamSlant: 0.16, train: 1, flicker: 1,
-      flowA: 0xbfd8ea, flowB: 0x5d84a8, flow: 0.25, speed: 1.3, swirl: 0, bokeh: 0.5, bokehColor: 0xbfe0ff, contrast: 0.2, tint: [0.97, 1.0, 1.04] },
+      flowA: 0xbfd8ea, flowB: 0x5d84a8, flow: 0.25, speed: 1.3, swirl: 0, bokeh: 0.5, bokehColor: 0xbfe0ff, contrast: 0.2, tint: [0.97, 1.0, 1.04], ball: 0, crowd: 0 },
     hall: { fog: 0.7, fogColor: 0x8a5fa8, beams: 1.0, beamColor: 0xff86d8, beamSwing: 0.32, beamSlant: 0.0, train: 0, flicker: 0,
-      flowA: 0xff9ad8, flowB: 0x72d4ff, flow: 0.28, speed: 0.8, swirl: 0, bokeh: 0.7, bokehColor: 0xffb3e6, contrast: 0.16, tint: [1.02, 0.98, 1.04] },
+      flowA: 0xff9ad8, flowB: 0x72d4ff, flow: 0.28, speed: 0.8, swirl: 0, bokeh: 0.7, bokehColor: 0xffb3e6, contrast: 0.16, tint: [1.02, 0.98, 1.04], ball: 0, crowd: 1 },
     lounge: { fog: 0.5, fogColor: 0x9a6c3e, beams: 0.6, beamColor: 0xffc98a, beamSwing: 0.03, beamSlant: 0.06, train: 0, flicker: 0,
-      flowA: 0xffd59c, flowB: 0xa7703e, flow: 0.2, speed: 0.45, swirl: 0, bokeh: 0.95, bokehColor: 0xffc47a, contrast: 0.14, tint: [1.06, 1.0, 0.92] },
+      flowA: 0xffd59c, flowB: 0xa7703e, flow: 0.2, speed: 0.45, swirl: 0, bokeh: 0.95, bokehColor: 0xffc47a, contrast: 0.14, tint: [1.06, 1.0, 0.92], ball: 1, crowd: 0 },
     challenge: { fog: 0.5, fogColor: null, beams: 0.3, beamColor: null, beamSwing: 0.08, beamSlant: 0.1, train: 0, flicker: 0,
-      flowA: null, flowB: null, flow: 0.55, speed: 1.8, swirl: 0.15, bokeh: 0.45, bokehColor: null, contrast: 0.14, tint: [1, 1, 1] },
+      flowA: null, flowB: null, flow: 0.55, speed: 1.8, swirl: 0.15, bokeh: 0.45, bokehColor: null, contrast: 0.14, tint: [1, 1, 1], ball: 0, crowd: 0 },
     bonus: { fog: 0.3, fogColor: null, beams: 0.18, beamColor: null, beamSwing: 0.1, beamSlant: 0, train: 0, flicker: 0,
-      flowA: null, flowB: 0xffffff, flow: 0.72, speed: 5.5, swirl: 1, bokeh: 0.55, bokehColor: null, contrast: 0.12, tint: [1, 1, 1] },
+      flowA: null, flowB: 0xffffff, flow: 0.72, speed: 5.5, swirl: 1, bokeh: 0.55, bokehColor: null, contrast: 0.12, tint: [1, 1, 1], ball: 0, crowd: 0 },
     boost: { fog: 0.3, fogColor: null, beams: 0.14, beamColor: null, beamSwing: 0.06, beamSlant: 0, train: 0, flicker: 0,
-      flowA: null, flowB: null, flow: 0.7, speed: 7.5, swirl: 0.4, bokeh: 0.45, bokehColor: null, contrast: 0.12, tint: [1, 1, 1] },
+      flowA: null, flowB: null, flow: 0.7, speed: 7.5, swirl: 0.4, bokeh: 0.45, bokehColor: null, contrast: 0.12, tint: [1, 1, 1], ball: 0, crowd: 0 },
   };
-  const NUMERIC = ["fog", "beams", "beamSwing", "beamSlant", "train", "flicker", "flow", "speed", "swirl", "bokeh", "contrast"];
+  const NUMERIC = ["fog", "beams", "beamSwing", "beamSlant", "train", "flicker", "flow", "speed", "swirl", "bokeh", "contrast", "ball", "crowd"];
 
   class LcdAtmosphere {
     constructor(owner) {
@@ -98,6 +98,8 @@
       this.createFlow();
       this.createHaze();
       this.createBokeh();
+      this.createTrain();
+      this.createCrowd();
       for (const key of ["fogColor", "beamColor", "flowA", "flowB", "bokehColor"]) this.state[key].set(PROFILES.station[key]);
       this.state.tint.set(...PROFILES.station.tint);
     }
@@ -184,7 +186,7 @@
           uTime: { value: 0 }, uHalf: { value: new T.Vector2(1, 1) }, uDepth: { value: 16 }, uAspect: { value: 4 },
           uFog: { value: 0 }, uFogColor: { value: new T.Color() }, uBeams: { value: 0 }, uBeamColor: { value: new T.Color() },
           uSwing: { value: 0 }, uSlant: { value: 0 }, uTrain: { value: 0 }, uTrainPos: { value: -9 }, uFlicker: { value: 1 },
-          uKick: { value: 0 }, uLevel: { value: 0 }, uSpark: { value: 0 },
+          uKick: { value: 0 }, uLevel: { value: 0 }, uSpark: { value: 0 }, uBall: { value: 0 }, uBallColor: { value: new T.Color(0xffe2b8) },
         },
         vertexShader: `
           uniform vec2 uHalf;
@@ -212,6 +214,8 @@
           uniform float uKick;
           uniform float uLevel;
           uniform float uSpark;
+          uniform float uBall;
+          uniform vec3 uBallColor;
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float noise(vec2 p) {
             vec2 i = floor(p), f = fract(p);
@@ -244,6 +248,17 @@
             float trainCore = exp(-pow((p.x - uTrainPos) / 0.45, 2.0)) * exp(-pow((vUv.y - 0.36) / 0.07, 2.0));
             float trainWash = exp(-pow((p.x - uTrainPos) / 1.4, 2.0)) * 0.12;
             color += vec3(0.85, 0.95, 1.0) * (trainCore * 0.9 + trainWash) * uTrain;
+            if (uBall > 0.01) {
+              // Mirror-ball flecks sweeping the room, denser toward the floor.
+              float spin = uTime * 0.12;
+              vec2 q = mat2(cos(spin), -sin(spin), sin(spin), cos(spin)) * (p + vec2(0.0, 0.9));
+              vec2 cell = floor(q * 8.0);
+              vec2 local = fract(q * 8.0) - 0.5;
+              float on = step(0.62, hash(cell));
+              float fleck = (1.0 - smoothstep(0.02, 0.11, length(local * vec2(1.0, 1.6)))) * on;
+              float floorBias = 0.45 + 0.55 * smoothstep(0.75, 0.15, vUv.y);
+              color += uBallColor * fleck * floorBias * uBall * (0.5 + 0.5 * sin(uTime * 3.0 + hash(cell) * 6.283));
+            }
             color *= uFlicker * (1.0 + uKick * 0.55 + uLevel * 0.2 + uSpark * 0.4);
             gl_FragColor = vec4(color, 1.0);
           }
@@ -315,6 +330,118 @@
       this.bokeh.frustumCulled = false;
       this.bokeh.renderOrder = 10;
       this.group.add(this.bokeh);
+    }
+
+    static canvasTexture(T, width, height, draw) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      draw(canvas.getContext("2d"), width, height);
+      const texture = new T.CanvasTexture(canvas);
+      texture.anisotropy = 4;
+      return texture;
+    }
+
+    // Station set piece: a lit commuter train rushing past behind the pillars.
+    createTrain() {
+      const T = this.T, owner = this.owner;
+      let seed = 3;
+      const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const texture = LcdAtmosphere.canvasTexture(T, 2048, 128, (ctx, w, h) => {
+        ctx.fillStyle = "#0b0f14"; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "#26313a"; ctx.fillRect(0, 12, w, 4); ctx.fillRect(0, h - 22, w, 3);
+        for (let car = 0; car < 4; car += 1) {
+          const x0 = car * 512;
+          ctx.fillStyle = "#000"; ctx.fillRect(x0, 0, 6, h);
+          for (let win = 0; win < 7; win += 1) {
+            const x = x0 + 26 + win * 68;
+            const glow = ctx.createLinearGradient(0, 30, 0, 86);
+            glow.addColorStop(0, "#fff8e6"); glow.addColorStop(1, "#d8e6f0");
+            ctx.fillStyle = glow; ctx.fillRect(x, 30, 48, 56);
+            ctx.fillStyle = "rgba(10,14,18,0.8)";
+            for (let k = 0; k < 2; k += 1) if (rand() < 0.55) {
+              const px = x + 8 + rand() * 30;
+              ctx.beginPath(); ctx.arc(px, 58, 7, 0, 7); ctx.fill(); ctx.fillRect(px - 10, 64, 20, 22);
+            }
+          }
+        }
+      });
+      texture.wrapS = T.RepeatWrapping;
+      texture.repeat.set(2, 1);
+      const material = owner.trackMaterial(new T.MeshBasicMaterial({ map: texture, color: 0xc8d4dc, fog: true }));
+      owner.textures.push(texture);
+      this.train = new T.Mesh(owner.track(new T.PlaneGeometry(60, 2.6)), material);
+      this.train.rotation.y = -Math.PI / 2;
+      this.train.visible = false;
+      this.group.add(this.train);
+    }
+
+    // Hall set piece: two rows of audience silhouettes along the bottom edge.
+    createCrowd() {
+      const T = this.T, owner = this.owner;
+      let seed = 11;
+      const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const texture = LcdAtmosphere.canvasTexture(T, 2048, 256, (ctx, w, h) => {
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#fff";
+        for (let x = -20; x < w + 20; x += 34 + rand() * 30) {
+          const head = 20 + rand() * 7, top = 110 + rand() * 40;
+          ctx.beginPath(); ctx.arc(x, top, head, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(x, top + head + 70, head * 2.3, 80, 0, Math.PI, 0); ctx.fill();
+          ctx.fillRect(x - head * 2.3, top + head + 70, head * 4.6, h);
+          if (rand() < 0.22) { ctx.save(); ctx.translate(x + (rand() < 0.5 ? -1 : 1) * head * 1.6, top + head + 20); ctx.rotate((rand() - 0.5) * 0.5); ctx.fillRect(-6, -120, 12, 130); ctx.beginPath(); ctx.arc(0, -122, 9, 0, 7); ctx.fill(); ctx.restore(); }
+        }
+      });
+      owner.textures.push(texture);
+      this.crowdMaterial = owner.trackMaterial(new T.ShaderMaterial({
+        uniforms: { uMap: { value: texture }, uRim: { value: new T.Color() }, uOpacity: { value: 0 }, uBob: { value: 0 }, uShift: { value: 0 },
+          uHalf: { value: new T.Vector2(1, 1) }, uDepth: { value: 4 }, uRow: { value: 0 } },
+        vertexShader: `
+          uniform vec2 uHalf;
+          uniform float uDepth;
+          uniform float uBob;
+          uniform float uRow;
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            vec2 xy = vec2(position.x * uHalf.x, -uHalf.y + (position.y + 1.0) * uHalf.y * 0.26 - uHalf.y * 0.02 + uBob * uHalf.y * 0.02);
+            gl_Position = projectionMatrix * vec4(xy, -uDepth, 1.0);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          uniform sampler2D uMap;
+          uniform vec3 uRim;
+          uniform float uOpacity;
+          uniform float uShift;
+          uniform float uRow;
+          varying vec2 vUv;
+          void main() {
+            vec2 uv = vec2(vUv.x * 1.6 + uShift + uRow * 0.37, vUv.y);
+            float body = texture2D(uMap, uv).a;
+            float above = texture2D(uMap, uv + vec2(0.0, 0.03)).a;
+            float rim = clamp(body - above, 0.0, 1.0);
+            vec3 color = vec3(0.012, 0.012, 0.02) + uRim * rim * 0.9;
+            gl_FragColor = vec4(color, body * uOpacity);
+          }
+        `,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      texture.wrapS = T.RepeatWrapping;
+      this.crowdRows = [0, 1].map(row => {
+        const material = row ? this.crowdMaterial.clone() : this.crowdMaterial;
+        if (row) owner.trackMaterial(material);
+        material.uniforms.uMap.value = texture;
+        material.uniforms.uRow.value = row;
+        material.uniforms.uDepth.value = row ? 6 : 4;
+        const mesh = new T.Mesh(owner.track(new T.PlaneGeometry(2, 2)), material);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = row ? 11 : 12;
+        mesh.visible = false;
+        this.group.add(mesh);
+        return mesh;
+      });
     }
 
     // Board events the player just caused. Visible actions only.
@@ -403,6 +530,27 @@
       haze.uKick.value = kick;
       haze.uLevel.value = level;
       haze.uSpark.value = this.spark;
+
+      haze.uBall.value = this.state.ball;
+
+      // Train: runs with the passing-light sweep, deep behind the station pillars.
+      const trainVisible = this.state.train > 0.3 && trainT >= -0.1 && trainT <= 1.1;
+      this.train.visible = trainVisible;
+      if (trainVisible) {
+        const side = Math.max(1, aspect / 1.8) * 5.8;
+        this.train.position.set(camera.position.x + side, -0.35, camera.position.z - 95 + trainT * 120);
+      }
+      const crowd = this.state.crowd;
+      this.crowdRows.forEach((mesh, row) => {
+        mesh.visible = crowd > 0.02;
+        if (!mesh.visible) return;
+        const u = mesh.material.uniforms, rowDepth = row ? 6 : 4;
+        u.uHalf.value.set(tanHalf * rowDepth * aspect * 1.05, tanHalf * rowDepth);
+        u.uOpacity.value = crowd * (row ? 0.7 : 0.95);
+        u.uBob.value = Math.sin(time * (row ? 5.2 : 6.1)) * 0.3 * (0.3 + kick) + kick * (row ? 0.6 : 1);
+        u.uShift.value = Math.sin(time * 0.05) * 0.02;
+        u.uRim.value.copy(this.state.beamColor);
+      });
 
       const bokeh = this.bokehMaterial.uniforms;
       bokeh.uTime.value = time;

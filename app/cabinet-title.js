@@ -215,7 +215,11 @@
     }
     render(now) {
       if(!this.node||!this.screen||!this.font)return;
-      const host=this.owner.host.getBoundingClientRect();
+      // The cabinet may be CSS-scaled to fit the window; work in the canvas's
+      // own (unscaled) pixels so DOM boxes and the 3D camera agree.
+      const hostRect=this.owner.host.getBoundingClientRect();
+      const unit=hostRect.width?this.owner.width/hostRect.width:1;
+      const host={left:hostRect.left*unit,top:hostRect.top*unit,width:hostRect.width*unit,height:hostRect.height*unit};
       if(!host.width||!host.height)return;
       const w=this.owner.width,h=this.owner.height;
       const distance=h/(2*Math.tan(this.camera.fov*Math.PI/360));
@@ -239,7 +243,8 @@
           const color=/mode-bonus-red/.test(classes)?0xe72412:/mode-bonus-blue/.test(classes)?0x158fe8:/mode-boost/.test(classes)?0x19bd70:0xe9a527;
           this.materials[2].color.set(color);this.materials[2].emissive.set(color);
         }
-        const box=this.node.getBoundingClientRect();
+        const rawBox=this.node.getBoundingClientRect();
+        const box={left:rawBox.left*unit,top:rawBox.top*unit,width:rawBox.width*unit,height:rawBox.height*unit};
         if(box.width&&box.height){
           const fit=Math.min(Math.min(box.width*1.10,host.width*.92)/(this.size.x+24),Math.min(box.height*1.18,host.height*.46)/(this.size.y+24));
           const age=Math.max(0,(now-this.startedAt)/1000);
