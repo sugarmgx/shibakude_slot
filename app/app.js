@@ -2091,14 +2091,36 @@ function spinShibakuBattle(force = null) {
   cz.lastBattleRole = roleKey;
 }
 
+// 最終G終了 -> 溜め(pushCharge) -> 決定音と同時にPUSH。溜め中はPUSHを受け付けない。
+async function chargeBattlePush() {
+  const cz = state.cz;
+  const generation = ui.operationGeneration;
+  ui.battleCharging = true;
+  renderInteractivity();
+  try {
+    await window.ShibakuEffects?.battleCharge?.({ won: Boolean(cz.heldAward) });
+  } finally {
+    if (generation === ui.operationGeneration && state.cz === cz) {
+      ui.battleCharging = false;
+      renderInteractivity();
+    }
+  }
+}
+
 async function revealBattlePush() {
   const cz = state.cz;
-  if (state.mode !== "cz" || cz?.key !== "shibaku" || !cz.pushPending || ui.battleRevealing) return;
+  if (state.mode !== "cz" || cz?.key !== "shibaku" || !cz.pushPending || ui.battleRevealing || ui.battleCharging) return;
   const generation = ui.operationGeneration;
   ui.battleRevealing = true;
   renderInteractivity();
   const won = Boolean(cz.heldAward);
-  window.ShibakuEffects?.battleReveal?.(won);
+  // C9: 勝利時の一部は、一度ガラスにヒビが入ってから割れて逆転する(演出側の抽選)。
+  const revival = !ui.debugFast && won && Boolean(window.ShibakuEffects?.battleRevivalRoll?.());
+  if (revival) {
+    await window.ShibakuEffects.battleRevival();
+    if (generation !== ui.operationGeneration || state.cz !== cz) return;
+  }
+  window.ShibakuEffects?.battleReveal?.(won, { revival });
   const revealSound = playSoundEffect(won ? "ichikaku" : "challengeFail");
   if (!won) ui.battleFailureSound = revealSound;
   if (!ui.debugFast) await sleep(won ? 1400 : 650);
@@ -2534,6 +2556,7 @@ function dismissChallengeFailure() {
 }
 
 function stopAllSoundEffects() {
+  window.ShibakuFx?.stopAll();
   for (const sound of ui.activeSfx) {
     sound.pause();
     sound.currentTime = 0;
@@ -2958,6 +2981,7 @@ function beginPendingSpin(afterState, force = null) {
 
   startSpinLoop();
   render();
+  if (state.mode === "cz" && state.cz) window.ShibakuEffects?.czLever?.(state.cz.key, state.cz.gamesLeft);
   window.ShibakuEffects?.normalCueBegin?.(state, afterState);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
     window.ShibakuEffects?.battleBeat?.(0, afterState.cz?.lastBattleRole);
@@ -3480,7 +3504,9 @@ async function stopReelChecked(reelIndex) {
   playReelStopSound(reelIndex);
   window.ShibakuEffects?.normalCueStop?.(pendingAtStart.nextStop + 1, pendingAtStart.displayRoleKey);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
-    window.ShibakuEffects?.battleBeat?.(pendingAtStart.nextStop + 1, pendingAtStart.afterState.cz?.lastBattleRole);
+    window.ShibakuEffects?.battleBeat?.(pendingAtStart.nextStop + 1, pendingAtStart.afterState.cz?.lastBattleRole, {
+      held: Boolean(pendingAtStart.afterState.cz?.heldAward),
+    });
   }
 
   if (reelIndex === 0 && ui.pendingSpin.presentationRoleKey === "babaSandwich") {
@@ -3609,6 +3635,7 @@ function finishPendingSpin() {
   const pending = ui.pendingSpin;
   const resolver = pending.finishResolver;
   const beforeState = snapshotState(state);
+  const btDrumResult = state.mode === "bt" ? afterState.bt?.pendingResult ?? null : null;
   const stoppedIndexes = [...afterState.reelStops];
   afterState = settleDisplayedPayout(afterState, pending);
   afterState = finalizeSpecialPendingState(beforeState, pending, afterState);
@@ -3645,13 +3672,25 @@ function finishPendingSpin() {
     window.ShibakuEffects.czDevelop(beforeState, afterState);
     lockMainAction(1850, "cz-develop");
   }
+  // D10: the drum lands (slow / slip / overshoot) before the result shows.
+  const btLandingMs = btDrumResult && !ui.debugFast
+    ? window.ShibakuEffects?.btLanding?.(btDrumResult, beforeState.bt?.misses || 0) || 0
+    : 0;
+  if (enteredBabaBonusReady) {
+    // Hold the LCD before render() so "BONUS確定" enters after the blackout lifts.
+    window.ShibakuEffects?.babaBonusReady?.();
+    lockMainAction(1100, "baba-bonus-ready");
+  }
   render();
   playTransitionSounds(beforeState, afterState);
   playResultSound(afterState);
   window.ShibakuEffects?.transition(beforeState, afterState);
   if (beforeState.mode === "bt" && ["miss", "end", "retry"].includes(afterState.btView?.result)) {
-    if (afterState.btView.result !== "retry") playSoundEffect("btMiss");
-    lockMainAction(1450, "bt-result");
+    if (afterState.btView.result !== "retry") {
+      const generation = ui.operationGeneration;
+      window.setTimeout(() => { if (generation === ui.operationGeneration) playSoundEffect("btMiss"); }, btLandingMs);
+    }
+    lockMainAction(Math.max(1450, btLandingMs + 700), "bt-result");
   }
   if (["bonus", "at", "tama"].includes(beforeState.mode) && afterState.displayRoleKey === "bell") {
     window.ShibakuCabinet?.bellPayout(afterState.settledPayout || 0);
@@ -3661,15 +3700,15 @@ function finishPendingSpin() {
     ui.battleWaitPromise = new Promise((resolve) => { ui.battleWaitResolver = resolve; });
     stopAllSoundEffects();
     stopBonusMusic();
-    window.ShibakuEffects?.battlePush?.();
-    renderInteractivity();
-    if (ui.debugFast) revealBattlePush();
+    if (ui.debugFast) {
+      window.ShibakuEffects?.battlePush?.();
+      renderInteractivity();
+      revealBattlePush();
+    } else {
+      chargeBattlePush();
+    }
   }
 
-  if (enteredBabaBonusReady) {
-    window.ShibakuEffects?.babaBonusReady?.();
-    lockMainAction(900, "baba-bonus-ready");
-  }
 
   if (afterState.vStockAwardedThisGame) {
     window.ShibakuEffects?.vStockAcquired?.(afterState);
@@ -3903,6 +3942,7 @@ function resetAll() {
   ui.battleWaitResolver = null;
   ui.battleWaitPromise = null;
   ui.battleRevealing = false;
+  ui.battleCharging = false;
   ui.battleFailureSound = null;
   ui.autoGeneration += 1;
   ui.mainActionPromise = null;
@@ -4344,8 +4384,10 @@ function renderInteractivity() {
   const frozen = ui.tamaFreezeActive || Boolean(state.cz?.pushPending) || ui.battleRevealing;
   const battlePush = document.querySelector("#battlePushButton");
   if (battlePush) {
-    battlePush.disabled = !state.cz?.pushPending || ui.battleRevealing;
-    battlePush.classList.toggle("is-ready", Boolean(state.cz?.pushPending) && !ui.battleRevealing);
+    const pushReady = Boolean(state.cz?.pushPending) && !ui.battleRevealing && !ui.battleCharging;
+    const noticePush = ui.spinning && Boolean(window.ShibakuEffects?.noticePushArmed?.());
+    battlePush.disabled = !pushReady && !noticePush;
+    battlePush.classList.toggle("is-ready", pushReady);
   }
   const nonSpinAction = ui.spinning || state.auto || locked || frozen;
   dom.spinButton.disabled = state.auto || locked || frozen || (ui.spinning && Boolean(ui.pendingSpin?.resolving));
@@ -4480,6 +4522,11 @@ dom.reels.forEach((reel) => reelResizeObserver.observe(reel));
 dom.spinButton.addEventListener("click", activateSpinControl);
 
 window.addEventListener("keydown", (event) => {
+  // A4: Enter presses the lit PUSH dome during a spin (Space keeps stopping reels).
+  if (event.code === "Enter" && !event.repeat && ui.spinning && !event.target?.closest?.("button, input, select, textarea, .cabinet-drawer")) {
+    if (pressNoticePush()) event.preventDefault();
+    return;
+  }
   const reelKey = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 }[event.code];
   if ((event.code !== "Space" && reelKey === undefined) || event.repeat) return;
   const target = event.target;
@@ -4499,7 +4546,17 @@ window.addEventListener("keydown", (event) => {
   activateSpinControl();
 });
 
-document.querySelector("#battlePushButton")?.addEventListener("click", revealBattlePush);
+// A4: the lit PUSH dome during a normal spin reveals the notice color.
+function pressNoticePush() {
+  if (!window.ShibakuEffects?.noticePush?.()) return false;
+  renderInteractivity();
+  return true;
+}
+
+document.querySelector("#battlePushButton")?.addEventListener("click", () => {
+  if (pressNoticePush()) return;
+  revealBattlePush();
+});
 
 dom.autoButton.addEventListener("click", () => {
   state.auto = !state.auto;
@@ -4625,6 +4682,12 @@ ensureReelLayoutCatalog();
 logEvent("デモを起動しました");
 ensureBonusMusicElements();
 ensureSoundEffectElements();
+window.ShibakuFx?.configure({
+  context: () => ui.audioContext,
+  volume: () => ui.soundVolume,
+  enabled: () => ui.soundEnabled,
+});
+if (window.ShibakuEffects) window.ShibakuEffects.onNoticeArmed = () => renderInteractivity();
 window.ShibakuEffects?.init(
   document.querySelector("#effectStage"),
   document.querySelector("#lcdStage"),

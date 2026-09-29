@@ -67,18 +67,6 @@
 .lcd-screen.battle-active .lcd-kicker { position: absolute; top: 16px; left: 22px; }
 .lcd-screen.battle-push .lcd-title { font-size: clamp(64px, 9vw, 110px); color: #fff2ab; animation: pushLamp 900ms ease-in-out infinite alternate; }
 .lcd-screen.battle-win .lcd-title { font-size: clamp(85px, 12vw, 150px); }
-.battle-glass { position: absolute; z-index: 12; inset: 0; pointer-events: none; opacity: 0; background: conic-gradient(from 20deg at 47% 44%,transparent 0deg 50deg,#edfcffcc 50deg 51deg,transparent 51deg 124deg,#c2efffa6 124deg 125deg,transparent 125deg 242deg,#fff 242deg 243deg,transparent 243deg),conic-gradient(from 0deg at 56% 54%,transparent 0deg 24deg,#effaffb0 24deg 25deg,transparent 25deg 170deg,#fff8 170deg 171deg,transparent 171deg); }
-.battle-glass.is-broken { opacity: 1; animation: glassImpact 500ms ease-out; }
-.battle-glass i { position: absolute; inset: 0; background: linear-gradient(135deg,#d8f6ff88,transparent 48%,#fff9 50%,transparent 52%); transform-origin: 47% 44%; }
-.battle-glass i:nth-child(1) { clip-path: polygon(47% 44%,0 0,70% 0); }
-.battle-glass i:nth-child(2) { clip-path: polygon(47% 44%,70% 0,100% 0,100% 45%); }
-.battle-glass i:nth-child(3) { clip-path: polygon(47% 44%,100% 45%,100% 100%); }
-.battle-glass i:nth-child(4) { clip-path: polygon(47% 44%,100% 100%,30% 100%); }
-.battle-glass i:nth-child(5) { clip-path: polygon(47% 44%,30% 100%,0 100%,0 65%); }
-.battle-glass i:nth-child(6) { clip-path: polygon(47% 44%,0 65%,0 0); }
-.battle-glass.is-broken i { animation: glassScatter 650ms ease-in forwards; }
-@keyframes glassScatter { from { transform: scale(1); opacity: .8; } to { transform: scale(1.7) rotate(calc((var(--shard) - 3) * 7deg)); opacity: 0; } }
-@keyframes glassImpact { 0% { transform: scale(1.12); background-color: #fff; } 100% { transform: scale(1); background-color: transparent; } }
 @media (max-height: 800px) and (min-width: 981px) {
   .lcd-screen { height: clamp(180px, 27vh, 215px); }
   .machine-panel { padding: 6px 12px; }

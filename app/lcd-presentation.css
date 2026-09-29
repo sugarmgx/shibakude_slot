@@ -1,0 +1,142 @@
+/* LCD presentation layer: PUSH charge, glass, notices, CZ build-up. */
+
+/* ---------- Glass ---------- */
+.lcd-glass { position: absolute; inset: 0; z-index: 12; width: 100%; height: 100%; pointer-events: none; opacity: 0; }
+.lcd-glass.is-active { opacity: 1; }
+.lcd-screen.battle-loss { animation: glassHitShake 60ms steps(2, end) 6; }
+.lcd-screen.battle-revival { filter: saturate(.5) brightness(.8); }
+@keyframes glassHitShake { 50% { transform: translate(3px, -2px); } }
+
+/* ---------- しばく: charge before PUSH ---------- */
+.lcd-screen.battle-charge::before {
+  content: ""; position: absolute; inset: 0; z-index: 11; pointer-events: none; mix-blend-mode: normal;
+  background:
+    radial-gradient(circle at 50% 52%, transparent 0 16%, #000a 55%, #000 100%),
+    repeating-radial-gradient(circle at 50% 52%, #fff0 0 18px, #ffd98a66 19px 22px, #fff0 23px 46px);
+  animation: chargeGather 900ms cubic-bezier(.5, 0, .9, .4) infinite, chargeTighten 3.5s ease-in forwards;
+}
+.lcd-screen.battle-charge::after {
+  content: ""; position: absolute; left: 50%; top: 52%; z-index: 11; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border-radius: 50%; pointer-events: none; opacity: 1;
+  background: radial-gradient(circle, #fff 0 30%, #ffd98a 45%, #ff9d2e00 70%);
+  box-shadow: 0 0 30px 10px #ffb84a88;
+  animation: chargeCore 3.5s ease-in forwards;
+}
+.lcd-screen.battle-charge { animation: chargeShake 70ms steps(2, end) infinite; animation-delay: 1.8s; }
+@keyframes chargeGather { from { background-size: 100% 100%, 260% 260%; background-position: center, center; } to { background-size: 100% 100%, 100% 100%; } }
+@keyframes chargeTighten { from { opacity: .55; } to { opacity: 1; } }
+@keyframes chargeCore { 0% { transform: scale(.4); opacity: .3; } 85% { transform: scale(5); opacity: 1; } 100% { transform: scale(7); opacity: 1; } }
+@keyframes chargeShake { 50% { transform: translate(1px, -1px); } }
+
+/* PUSH: normal, abnormally huge, abnormally red */
+.lcd-screen.battle-push .lcd-title { animation: pushLamp 900ms ease-in-out infinite alternate, pushArrive 260ms cubic-bezier(.2, 1.6, .4, 1) both; }
+.lcd-screen.battle-push.push-huge .lcd-title {
+  font-size: clamp(150px, 22vw, 290px); line-height: .8; letter-spacing: -.02em;
+  animation: pushLamp 600ms ease-in-out infinite alternate, pushArriveHuge 420ms cubic-bezier(.2, 1.8, .4, 1) both;
+}
+.lcd-screen.battle-push.push-red .lcd-title {
+  color: #ff1d1d; text-shadow: 4px 4px 0 #3a0000, 0 0 24px #ff0000, 0 0 60px #ff3b1f;
+  animation: pushLampRed 380ms steps(2, end) infinite, pushArrive 260ms cubic-bezier(.2, 1.6, .4, 1) both;
+}
+.lcd-screen.battle-push.push-red { box-shadow: inset 0 0 120px #ff0000aa; }
+@keyframes pushArrive { from { transform: scale(2.2); opacity: 0; filter: blur(6px); } to { transform: scale(1); opacity: 1; filter: none; } }
+@keyframes pushArriveHuge { from { transform: scale(.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes pushLampRed { 50% { color: #ff8a78; text-shadow: 4px 4px 0 #3a0000, 0 0 40px #ff0000, 0 0 90px #ff3b1f; } }
+
+/* PUSH dome: charging glow, red when hot, lit for the button notice */
+html.cab #battlePushButton.is-charging { box-shadow: 0 0 0 3px #05080a, 0 0 0 6px #ffb43b55, 0 0 22px #ffb43b66, 0 6px 0 #020405; animation: cabPushCharge 240ms ease-in-out infinite alternate; }
+html.cab #battlePushButton.is-hot.is-ready { box-shadow: 0 0 0 3px #05080a, 0 0 0 8px #ff2a1f, 0 0 44px #ff2a1fdd, 0 6px 0 #020405; animation: cabPushRingRed 260ms steps(2, end) infinite; }
+html.cab #battlePushButton.is-hot.is-ready span { background: radial-gradient(circle at 38% 28%, #fff0ec, #ff5a4a 40%, #c3120a 75%, #5a0402); color: #fff; }
+html.cab #battlePushButton.is-notice { box-shadow: 0 0 0 3px #05080a, 0 0 0 8px var(--notice-color, #ffffff), 0 0 36px var(--notice-color, #ffffff), 0 6px 0 #020405; animation: cabPushRing 420ms ease-in-out infinite alternate; }
+html.cab #battlePushButton.is-notice span { color: #10151a; background: radial-gradient(circle at 38% 28%, #ffffff, var(--notice-color, #ffffff) 45%, #1d252b 95%); }
+@keyframes cabPushCharge { to { box-shadow: 0 0 0 3px #05080a, 0 0 0 7px #ffd98a, 0 0 34px #ffc257, 0 6px 0 #020405; } }
+@keyframes cabPushRingRed { 50% { box-shadow: 0 0 0 3px #05080a, 0 0 0 8px #ffd0c8, 0 0 60px #ff2a1f, 0 6px 0 #020405; } }
+
+/* ---------- CZ build toward the final game ---------- */
+.machine-panel.cz-final .lcd-screen::before {
+  content: ""; position: absolute; inset: 0; z-index: 10; pointer-events: none; mix-blend-mode: normal;
+  background: radial-gradient(ellipse at 50% 50%, transparent 30%, #000c 100%);
+  animation: czFinalBeat 520ms ease-out infinite;
+}
+.machine-panel.cz-final .lcd-screen { animation: czFinalShake 90ms steps(2, end) infinite; }
+@keyframes czFinalBeat { 0% { opacity: 1; } 30% { opacity: .55; } 100% { opacity: 1; } }
+@keyframes czFinalShake { 50% { transform: translate(-1px, 1px); } }
+
+/* ---------- Notices ---------- */
+.lcd-notice { position: absolute; inset: 0; z-index: 9; pointer-events: none; }
+.lcd-notice[hidden] { display: none; }
+
+/* A1 step-up: a lamp frame that steps up in color and size */
+.notice-step { position: absolute; left: 50%; top: 46%; width: 118px; height: 118px; margin: -59px 0 0 -59px; transform: scale(calc(.62 + var(--step, 0) * .12)); transition: transform 160ms cubic-bezier(.2, 1.6, .4, 1); }
+.notice-step i { position: absolute; inset: 0; border-radius: 50%; border: 5px solid var(--notice-color); box-shadow: 0 0 18px var(--notice-color), inset 0 0 18px var(--notice-color); }
+.notice-step i:nth-child(2) { inset: 18px; border-width: 3px; opacity: .8; }
+.notice-step i:nth-child(3) { inset: 38px; border: 0; background: radial-gradient(circle, #fff, var(--notice-color) 55%, transparent 72%); }
+.notice-step.is-stepping { animation: noticeStepFlash 240ms ease-out; }
+@keyframes noticeStepFlash { 0% { filter: brightness(2.6); } 100% { filter: none; } }
+.notice-rainbow { --notice-color: #fff; }
+.notice-rainbow i { border-image: none; animation: noticeRainbow 600ms linear infinite; }
+@keyframes noticeRainbow { 0% { filter: hue-rotate(0deg) saturate(2); } 100% { filter: hue-rotate(360deg) saturate(2); } }
+
+/* A1 station scene cues: fluorescent flicker -> alarm lamp */
+.machine-panel.notice-flicker .lcd-screen { animation: noticeFlicker 700ms steps(1, end) 1; }
+@keyframes noticeFlicker { 0%, 12%, 30%, 64% { filter: brightness(1); } 8%, 22%, 48% { filter: brightness(.35); } }
+.notice-alarm { position: absolute; top: 6%; width: clamp(34px, 3.4vw, 58px); height: clamp(34px, 3.4vw, 58px); border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff, var(--notice-color) 45%, #300 90%); box-shadow: 0 0 22px var(--notice-color); animation: noticeAlarm 260ms steps(2, end) infinite; }
+.notice-alarm.left { left: 12%; }
+.notice-alarm.right { right: 12%; animation-delay: 130ms; }
+@keyframes noticeAlarm { 50% { opacity: .15; box-shadow: none; } }
+
+/* A3 station LED departure board */
+.notice-board {
+  position: absolute; left: 50%; top: 5%; width: 56%; transform: translateX(-50%);
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 6px 14px;
+  border: 3px solid #2a2f33; border-radius: 3px; background: #050607; box-shadow: 0 0 0 1px #6c7479, 0 6px 18px #000c;
+  font: 800 clamp(22px, 2.6vw, 44px)/1 var(--font-display, sans-serif); letter-spacing: .08em;
+  background-image: radial-gradient(#ffffff08 1px, transparent 1.4px); background-size: 4px 4px;
+}
+.notice-board b { color: var(--notice-color); text-shadow: 0 0 8px var(--notice-color); padding: 2px 8px; border: 2px solid var(--notice-color); border-radius: 2px; }
+.notice-board span { color: #ffb638; text-shadow: 0 0 6px #ff9a1f; white-space: nowrap; overflow: hidden; }
+.notice-board em { color: #9fe3ff; font-style: normal; text-shadow: 0 0 6px #59c8ff; }
+.notice-board.is-flip b { animation: noticeFlip 220ms steps(3, end); }
+@keyframes noticeFlip { 0% { transform: scaleY(.1); } 60% { transform: scaleY(1.2); } 100% { transform: scaleY(1); } }
+.notice-board.notice-rainbow b { animation: noticeRainbow 600ms linear infinite; }
+
+/* A4 PUSH button notice: the LCD answers the dome with a color burst */
+.notice-burst { position: absolute; inset: -20%; background: radial-gradient(circle at 50% 50%, var(--notice-color) 0, transparent 55%); mix-blend-mode: screen; animation: noticeBurst 900ms ease-out forwards; }
+@keyframes noticeBurst { from { transform: scale(.2); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+
+/* A5 blackout notice: LCD and cabinet lamps go dark from the lever */
+.machine-panel.notice-blackout .lcd-screen,
+.machine-panel.notice-blackout .machine-top { filter: brightness(0); transition: filter 60ms steps(1, end); }
+.machine-panel.notice-blackout .cabinet-lights,
+.machine-panel.notice-blackout .effect-stage { opacity: .04; }
+.machine-panel.notice-release .lcd-screen { animation: noticeRelease 700ms ease-out; }
+@keyframes noticeRelease { 0% { filter: brightness(3) saturate(1.6); } 100% { filter: none; } }
+
+/* Cabinet lamps follow the notice color */
+.machine-window.notice-lamps .cabinet-lights span { background: var(--notice-color) !important; box-shadow: 0 0 14px var(--notice-color) !important; animation: noticeLamp 180ms steps(2, end) 6; }
+@keyframes noticeLamp { 50% { opacity: .3; } }
+
+/* F14 premium: rainbow sweep over LCD and lamps */
+.machine-panel.notice-premium .lcd-screen::after {
+  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; mix-blend-mode: screen;
+  background: linear-gradient(100deg, #ff004c88, #ff9d0088, #ffe60088, #2eff6a88, #00c8ff88, #7a5cff88, #ff00d488);
+  background-size: 300% 100%; animation: premiumSweep 900ms linear infinite, premiumFade 2.6s ease-out forwards;
+}
+.machine-window.notice-premium .cabinet-lights span { animation: noticeRainbow 400ms linear infinite; background: #ff3b6b !important; }
+@keyframes premiumSweep { to { background-position: 300% 0; } }
+@keyframes premiumFade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+
+/* D11: one lamp left in the drum */
+.machine-panel.last-lamp .lcd-screen { filter: saturate(.35) brightness(.82); }
+.machine-panel.last-lamp .lcd-screen::before {
+  content: ""; position: absolute; inset: 0; z-index: 10; pointer-events: none; mix-blend-mode: normal;
+  background: radial-gradient(ellipse at 50% 55%, transparent 40%, #3a0006aa 100%);
+  animation: lastLampBeat 1000ms ease-out infinite;
+}
+@keyframes lastLampBeat { 0%, 36% { opacity: .35; } 6%, 26% { opacity: 1; } 100% { opacity: .35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lcd-screen.battle-charge, .lcd-screen.battle-charge::before, .lcd-screen.battle-charge::after,
+  .machine-panel.cz-final .lcd-screen, .machine-panel.cz-final .lcd-screen::before, .machine-panel.last-lamp .lcd-screen::before,
+  .lcd-screen.battle-push .lcd-title, .machine-panel.notice-premium .lcd-screen::after { animation: none; }
+}

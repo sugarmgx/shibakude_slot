@@ -14,6 +14,14 @@
   const PRESENTATION_KEYS = ["normal", "challenge", "bonus", "boost"];
   // Normal-stage camera angles: [pos x, y, z, look x, y, z, fov, dolly x, y, z].
   const SHOT_SECONDS = 15;
+  // Bonus tunnel shots: [x, y, z, lookX, lookY, fov]
+  const BONUS_SHOTS = [
+    [-1.2, 0.55, 7.4, 0.7, -0.2, 54],
+    [1.4, -0.8, 6.8, -0.6, 0.4, 70],
+    [0, 0.1, 5.6, 0, 0, 46],
+    [-0.4, 1.3, 7.8, 0.3, -0.9, 60],
+    [2.0, 0.3, 7.0, -1.2, -0.1, 58],
+  ];
   const NORMAL_SHOTS = {
     station: [
       [0, -0.6, 10, 0, -0.3, -30, 50, 0, 0, -3],
@@ -1175,10 +1183,10 @@
 
     // Notice at lever-on. At the station it is a train (grade = look);
     // elsewhere the camera dashes forward down the stage and back.
-    notice(grade = "normal", direction = 1) {
+    notice(grade = "normal", direction = 1, tier = null) {
       const stage = this.scenery?.stage;
       const station = this.presentation.kind === "normal" && stage !== "同人音楽即売会" && stage !== "クラブのラウンジ";
-      if (station && this.atmosphere) this.atmosphere.runTrain(grade, direction);
+      if (station && this.atmosphere) this.atmosphere.runTrain(grade, direction, tier);
       else this.rush({ duration: grade === "normal" ? 0.8 : 1.0, strength: grade === "normal" ? 0.55 : grade === "express" ? 0.85 : 1.05, returns: true });
       if (grade === "gold") {
         window.setTimeout(() => this.impact({ strength: 0.6, hold: 0, color: 0xffc247, rays: 0.8, flash: 0.35, disturb: false }), station ? 620 : 420);
@@ -1694,14 +1702,16 @@
         return;
       }
       if (this.presentation.kind === "bonus") {
+        // E12: cut between tunnel shots on bar heads of the playing BGM.
+        const shot = BONUS_SHOTS[this.bonusBarCut(time)];
         this.camera.position.set(
-          -1.2 + Math.sin(time * 0.48 + variant) * 0.55,
-          0.55 + Math.cos(time * 0.39) * 0.25,
-          7.4 - phase.speed * phase.local * 1.8,
+          shot[0] + Math.sin(time * 0.48 + variant) * 0.35,
+          shot[1] + Math.cos(time * 0.39) * 0.18,
+          shot[2] - phase.speed * phase.local * 1.8,
         );
-        this.camera.fov = (variant === 2 ? 68 : 54) + this.cutPulse * 7;
+        this.camera.fov = shot[5] + (variant === 2 ? 10 : 0) + this.cutPulse * 7;
         this.camera.updateProjectionMatrix();
-        this.camera.lookAt(0.7, -0.2, -16);
+        this.camera.lookAt(shot[3], shot[4], -16);
         return;
       }
       if (this.presentation.kind === "boost") {
@@ -1739,6 +1749,32 @@
       const targetX = phase.index === 6 ? -2.5 : phase.index % 2 ? -0.8 : 1.2;
       const targetY = phase.index === 4 ? 1.1 : 0;
       this.camera.lookAt(targetX, targetY, -9 - travel * 5);
+    }
+
+    // Picks the bonus shot. With BGM playing, a cut lands on the first kick
+    // after two bars (or one bar of a slow track); without it, on a timer.
+    bonusBarCut(time) {
+      const music = this.music;
+      const cut = this.bonusCut ||= { at: -Infinity, shot: 0, clock: null };
+      const beat = music.active > 0.5 && music.beat > 0 ? music.beat : 0;
+      const now = beat ? music.time : time;
+      const interval = beat ? ([4, 8, 16].map((n) => n * beat).find((s) => s >= 2.8) || 16 * beat) : 4.5;
+      const since = now - cut.at;
+      const onBeat = beat && since > interval * 0.9 && (music.onset || 0) > 0.35;
+      if (cut.clock !== Boolean(beat) || since < 0 || since > interval * 1.35 || onBeat || (!beat && since >= interval)) {
+        const first = cut.clock === null;
+        cut.clock = Boolean(beat);
+        cut.at = now;
+        if (!first) {
+          // Local xorshift: presentation only, never the game's random source.
+          let seed = (cut.seed ||= (Date.now() >>> 0) || 1);
+          seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+          cut.seed = seed;
+          cut.shot = (cut.shot + 1 + (seed % (BONUS_SHOTS.length - 1))) % BONUS_SHOTS.length;
+          this.cutPulse = Math.max(this.cutPulse, 0.55);
+        }
+      }
+      return cut.shot;
     }
 
     updatePresentationScenes(phase, time) {

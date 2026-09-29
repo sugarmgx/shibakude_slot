@@ -26,9 +26,29 @@
       if (!this.cache.has(track)) {
         const data = window.ShibakuBgmPulse?.[track];
         const decode = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
-        this.cache.set(track, data ? { rate: data.rate, low: decode(data.low), level: decode(data.level) } : null);
+        const low = data ? decode(data.low) : null;
+        this.cache.set(track, data ? { rate: data.rate, low, level: decode(data.level), beat: LcdMusicPulse.beatLength(low, data.rate) } : null);
       }
       return this.cache.get(track);
+    }
+
+    // Beat length (s) from the autocorrelation of the low-band onset
+    // envelope, searched between 80 and 180 BPM.
+    static beatLength(values, rate) {
+      const n = values.length, env = new Float32Array(n);
+      let average = values[0] || 0;
+      for (let i = 0; i < n; i += 1) { average += (values[i] - average) * 0.05; env[i] = Math.max(0, values[i] - average * 1.05); }
+      const minLag = Math.floor(rate * 60 / 180), maxLag = Math.ceil(rate * 60 / 80), scores = [];
+      let bestLag = minLag;
+      for (let lag = minLag - 1; lag <= maxLag + 1; lag += 1) {
+        let score = 0;
+        for (let i = lag; i < n; i += 1) score += env[i] * env[i - lag];
+        scores[lag] = score;
+        if (lag >= minLag && lag <= maxLag && score > scores[bestLag]) bestLag = lag;
+      }
+      const a = scores[bestLag - 1], b = scores[bestLag], c = scores[bestLag + 1], denom = a - 2 * b + c;
+      const lag = bestLag + (denom ? 0.5 * (a - c) / denom : 0);
+      return lag / rate;
     }
 
     static sample(values, rate, time) {
@@ -42,6 +62,9 @@
       try { clock = window.ShibakuMusicClock?.() || null; } catch (_) {}
       const data = clock && this.curve(clock.track);
       this.active += ((data ? 1 : 0) - this.active) * Math.min(1, dt * 3);
+      this.beat = data?.beat || 0;
+      this.time = clock?.time || 0;
+      this.onset = 0;
       if (!data) {
         this.kick = Math.max(0, this.kick - dt * 6);
         this.level += (0 - this.level) * Math.min(1, dt * 2);
@@ -51,6 +74,7 @@
       const level = LcdMusicPulse.sample(data.level, data.rate, clock.time);
       this.average += (low - this.average) * Math.min(1, dt * 1.3);
       const onset = clamp((low - this.average * 1.08) * 3.2, 0, 1);
+      this.onset = onset;
       this.kick = Math.max(onset, this.kick - dt * 5.5);
       this.level += (level - this.level) * Math.min(1, dt * 10);
       return this;
@@ -345,7 +369,7 @@
     // liveries (commuter / express / gold) are the notice grades.
     createTrain() {
       const T = this.T, owner = this.owner;
-      const livery = (kind) => {
+      const livery = (kind, band = null) => {
         let seed = 3;
         const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
         const body = kind === "gold" ? "#3a2606" : "#0b0f14";
@@ -354,8 +378,18 @@
         const texture = LcdAtmosphere.canvasTexture(T, 2048, 128, (ctx, w, h) => {
           ctx.fillStyle = body; ctx.fillRect(0, 0, w, h);
           ctx.fillStyle = kind === "gold" ? "#ffd166" : "#26313a"; ctx.fillRect(0, 12, w, 4); ctx.fillRect(0, h - 22, w, 3);
-          if (kind === "express") { ctx.fillStyle = "#e0231b"; ctx.fillRect(0, 94, w, 10); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 106, w, 3); }
-          if (kind === "gold") { const band = ctx.createLinearGradient(0, 0, w, 0); band.addColorStop(0, "#fff3c4"); band.addColorStop(0.5, "#ffb43b"); band.addColorStop(1, "#fff3c4"); ctx.fillStyle = band; ctx.fillRect(0, 94, w, 12); }
+          if (band) {
+            // Notice color band (white < blue < yellow < green < red < gold < rainbow).
+            let fill = band;
+            if (band === "gold" || band === "rainbow") {
+              fill = ctx.createLinearGradient(0, 0, w, 0);
+              const stops = band === "gold" ? ["#fff3c4", "#ffb43b", "#fff3c4"] : ["#ff2a4a", "#ff9d1f", "#ffe93a", "#2fe36b", "#1fb8ff", "#8a5cff", "#ff2ad4"];
+              for (let repeat = 0; repeat < 4; repeat += 1) stops.forEach((color, i) => fill.addColorStop(Math.min(1, (repeat + i / stops.length) / 4), color));
+            }
+            ctx.fillStyle = fill; ctx.fillRect(0, 94, w, kind === "normal" ? 8 : 12);
+            if (kind === "express") { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 108, w, 3); }
+          } else if (kind === "express") { ctx.fillStyle = "#e0231b"; ctx.fillRect(0, 94, w, 10); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 106, w, 3); }
+          if (kind === "gold" && !band) { const band = ctx.createLinearGradient(0, 0, w, 0); band.addColorStop(0, "#fff3c4"); band.addColorStop(0.5, "#ffb43b"); band.addColorStop(1, "#fff3c4"); ctx.fillStyle = band; ctx.fillRect(0, 94, w, 12); }
           for (let car = 0; car < 4; car += 1) {
             const x0 = car * 512;
             ctx.fillStyle = "#000"; ctx.fillRect(x0, 0, 6, h);
@@ -378,6 +412,8 @@
         return texture;
       };
       this.trainLiveries = { normal: livery("normal"), express: livery("express"), gold: livery("gold") };
+      this.trainTierLiveries = ["#e8eef2", "#2f7bff", "#ffd23a", "#2fd36b", "#ff2a1f", "gold", "rainbow"]
+        .map((band, tier) => livery(tier >= 5 ? "gold" : tier >= 3 ? "express" : "normal", band));
       this.trainMaterial = owner.trackMaterial(new T.MeshBasicMaterial({ map: this.trainLiveries.normal, color: 0xc8d4dc, fog: false, transparent: true }));
       this.train = new T.Mesh(owner.track(new T.PlaneGeometry(60, 2.6)), this.trainMaterial);
       this.train.visible = false;
@@ -387,10 +423,10 @@
     }
 
     // Right side runs far -> near, left side runs near -> far.
-    runTrain(grade = "normal", direction = 1) {
+    runTrain(grade = "normal", direction = 1, tier = null) {
       const duration = grade === "express" ? 0.85 : grade === "gold" ? 1.15 : 1.4;
       this.trainRun = { start: this.clock + 0.2, duration, grade, direction };
-      this.trainMaterial.map = this.trainLiveries[grade] || this.trainLiveries.normal;
+      this.trainMaterial.map = (tier !== null && this.trainTierLiveries[tier]) || this.trainLiveries[grade] || this.trainLiveries.normal;
       this.trainMaterial.color.set(grade === "normal" ? 0xc8d4dc : 0xffffff);
       this.trainMaterial.needsUpdate = true;
       this.train.scale.x = grade === "express" ? 1.5 : 1;

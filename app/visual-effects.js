@@ -59,8 +59,9 @@
     api.latestState = null;
     api.burst = 0;
     api.battleHeld = false;
+    notices?.clear();
     api.battleEnd?.();
-    document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow");
+    document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow", "cz-final", "last-lamp");
     document.querySelector(".machine-window")?.classList.remove("bell-payout-flash", "baba-sandwich-clear", "baba-bonus-ready-glow", "bonus-confirmed", "bonus-confirm-red", "bonus-confirm-blue", "bonus-confirm-reg", "long-freeze");
     document.querySelector("#effectFlash")?.classList.remove("fire");
   };
@@ -395,53 +396,140 @@
     if(before.mode!=="normal"||after.mode!=="normal"||api.battleHeld||Date.now()<api.resultUntil||reducedMotion.matches)return;
     normalCue.begin(after.internalRoleKey||after.presentationRoleKey||"miss",cueRandom(),performance.now());
   };
-  api.normalCueStop = (order, displayedRole) => normalCue.stop(order,performance.now(),displayedRole);
+  api.normalCueStop = (order, displayedRole) => {
+    normalCue.stop(order,performance.now(),displayedRole);
+    notices?.stop(order);
+  };
 
-  const glass = document.createElement("div");
-  glass.className = "battle-glass";
-  glass.setAttribute("aria-hidden", "true");
-  for (let index = 0; index < 6; index += 1) {
-    const shard = document.createElement("i");
-    shard.style.setProperty("--shard", index);
-    glass.append(shard);
-  }
-  document.querySelector("#lcdScreen")?.append(glass);
-  api.battleBeat = (beat, role) => {
-    glass.classList.remove("is-broken");
+  const lcdGlass = window.ShibakuLcdGlass ? new window.ShibakuLcdGlass(document.querySelector("#lcdScreen")) : null;
+  const glass = {
+    crack: () => lcdGlass?.crack(),
+    shatter: () => lcdGlass?.shatter(),
+    clear: () => lcdGlass?.clear(),
+  };
+  const fx = (name, options) => window.ShibakuFx?.play(name, options);
+  const pushButton = () => document.querySelector("#battlePushButton");
+  const setScreen = (className, title = "") => {
+    const screen = document.querySelector("#lcdScreen");
+    if (screen) screen.className = className;
+    const kicker = document.querySelector("#lcdKicker");
+    const titleNode = document.querySelector("#lcdTitle");
+    const subtitle = document.querySelector("#lcdSubtitle");
+    if (kicker) kicker.textContent = "";
+    if (titleNode) titleNode.textContent = title;
+    if (subtitle) subtitle.textContent = "";
+    return screen;
+  };
+
+  // PRIVATE_SPEC: presentation-only draws (cueRandom), never the game lottery.
+  // Punch size leans on the held result: large punches mostly while winning.
+  api.battleBeat = (beat, role, hint = {}) => {
+    glass.clear();
     api.abstractScene?.cabinetWorld?.cue(beat, role);
     if (beat >= 2) api.abstractScene?.pulse(beat === 3 ? 1.25 : .6);
+    if (beat === 2 || beat === 3) {
+      const rare = !["miss", "replay", "bell"].includes(role);
+      const large = cueRandom() < (hint.held ? .58 : .12) + (rare ? .22 : 0);
+      fx(large ? "punchLarge" : "punchSmall");
+      if (large) api.abstractScene?.impact?.({ strength: .35, hold: 0, color: 0xffd9a0, rays: .3, disturb: false });
+    }
   };
-  api.battlePush = () => {
+
+  // After the final game: a charge (pushCharge) and then, together with the
+  // decide sound, PUSH. An abnormal PUSH (huge or red) mostly means a win.
+  const PUSH_ABNORMAL_RATE = { won: 0.30, lost: 0.02 };
+  api.battleCharge = ({ won } = {}) => new Promise((resolve) => {
+    const generation = effectGeneration;
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) world.waiting = true;
-    const screen = document.querySelector("#lcdScreen");
-    screen.className = "lcd-screen mode-challenge battle-push";
-    document.querySelector("#lcdKicker").textContent = "";
-    document.querySelector("#lcdTitle").textContent = "PUSH";
-    document.querySelector("#lcdSubtitle").textContent = "";
+    const abnormal = cueRandom() < (won ? PUSH_ABNORMAL_RATE.won : PUSH_ABNORMAL_RATE.lost);
+    const style = abnormal ? (cueRandom() < 0.5 ? "huge" : "red") : "normal";
+    setScreen("lcd-screen mode-challenge battle-charge");
+    pushButton()?.classList.add("is-charging");
+    const charge = fx(abnormal ? "pushChargeHot" : "pushCharge");
+    const started = performance.now();
+    // Gathering beats: short pulses that tighten as the charge builds.
+    const beat = (index) => {
+      if (generation !== effectGeneration || !api.battleHeld) return;
+      const elapsed = performance.now() - started;
+      api.abstractScene?.pulse(.35 + index * .08);
+      if (index < 24) scheduleEffect(() => beat(index + 1), Math.max(70, 260 - elapsed * .06));
+    };
+    beat(0);
+    const minimum = new Promise((done) => window.setTimeout(done, 1600));
+    const ceiling = new Promise((done) => window.setTimeout(done, 5200));
+    Promise.race([Promise.all([charge?.ended || Promise.resolve(), minimum]), ceiling]).then(() => {
+      pushButton()?.classList.remove("is-charging");
+      if (generation !== effectGeneration) return resolve(null);
+      fx(abnormal ? "decideButtonHot" : "decideButton");
+      api.battlePush(style);
+      resolve(style);
+    });
+  });
+  api.battlePush = (style = "normal") => {
+    api.battleHeld = true;
+    const world = api.abstractScene?.cabinetWorld;
+    if (world) world.waiting = true;
+    setScreen(`lcd-screen mode-challenge battle-push${style === "huge" ? " push-huge" : style === "red" ? " push-red" : ""}`, "PUSH");
+    pushButton()?.classList.toggle("is-hot", style === "red");
+    flash(style === "red" ? "warning" : "accent");
+    api.abstractScene?.impact?.({
+      strength: style === "normal" ? .25 : .6,
+      hold: 0,
+      color: style === "red" ? 0xff2a1f : 0xfff0c0,
+      rays: style === "normal" ? .15 : .7,
+      disturb: false,
+    });
   };
-  api.battleReveal = (won) => {
+
+  // C9: a win that first looks like the loss (the glass cracks), then the
+  // glass shatters and the win breaks through.
+  const REVIVAL_RATE = 0.2;
+  api.battleRevivalRoll = () => !reducedMotion.matches && cueRandom() < REVIVAL_RATE;
+  api.battleRevival = () => new Promise((resolve) => {
+    const generation = effectGeneration;
+    api.battleHeld = true;
+    const world = api.abstractScene?.cabinetWorld;
+    if (world) { world.outcome = false; world.beatAt = performance.now(); }
+    setScreen("lcd-screen mode-challenge battle-loss battle-revival");
+    pushButton()?.classList.remove("is-hot");
+    glass.crack();
+    fx("glassBreak");
+    api.abstractScene?.impact?.({ strength: .4, hold: .05, color: 0xbfe6ff, rays: .2, disturb: false });
+    scheduleEffect(() => {
+      glass.shatter();
+      fx("glassBreak2");
+      fx("revival");
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: 1.2, hold: .1, color: 0xffd76a, rays: 1.3 });
+    }, 1150);
+    window.setTimeout(() => resolve(generation === effectGeneration), 1500);
+  });
+  api.battleReveal = (won, options = {}) => {
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.outcome = won; world.beatAt = performance.now(); }
-    const screen = document.querySelector("#lcdScreen");
-    screen.className = `lcd-screen mode-challenge ${won ? "battle-win" : "battle-loss"}`;
-    document.querySelector("#lcdTitle").textContent = won ? "WIN" : "";
-    document.querySelector("#lcdSubtitle").textContent = "";
+    setScreen(`lcd-screen mode-challenge ${won ? "battle-win" : "battle-loss"}`, won ? "WIN" : "");
+    pushButton()?.classList.remove("is-hot");
     if (won) {
+      if (!options.revival) glass.clear();
       flash("hit");
       api.abstractScene?.pulse(4);
       api.abstractScene?.impact?.({ strength: 1, hold: 0.12, color: 0xffc247, rays: 1 });
+    } else {
+      glass.crack();
+      fx("glassBreak");
+      api.abstractScene?.impact?.({ strength: .45, hold: .06, color: 0xbfe6ff, rays: 0, disturb: false });
     }
-    else glass.classList.add("is-broken");
   };
   api.battleEnd = (preserveGlass = false) => {
     api.battleHeld = false;
     api.resultUntil = 0;
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.waiting = false; world.outcome = null; }
-    if (!preserveGlass) glass.classList.remove("is-broken");
+    pushButton()?.classList.remove("is-charging", "is-hot");
+    if (!preserveGlass) glass.clear();
   };
 
   api.ichikaku = (bonusType) => {
@@ -481,23 +569,20 @@
     noticeSeed ^= noticeSeed << 5; noticeSeed >>>= 0;
     return noticeSeed / 4294967296;
   };
-  const NOTICE_TABLE = {
-    none: [0.03, [0.9, 0.1, 0]],
-    weak: [0.07, [0.75, 0.25, 0]],
-    strong: [0.14, [0.6, 0.4, 0]],
-    cz: [0.45, [0.45, 0.45, 0.1]],
-    win: [0.6, [0.3, 0.5, 0.2]],
-  };
+  const notices = window.ShibakuNoticeDirector?.create({
+    random: noticeRandom,
+    fx: (name, options) => fx(name, options),
+    schedule: scheduleEffect,
+    scene: () => api.abstractScene,
+    reduced: () => reducedMotion.matches,
+    onArmed: () => api.onNoticeArmed?.(),
+  });
   api.noticeCue = (cue = {}) => {
-    if (reducedMotion.matches || !api.abstractScene?.notice) return;
-    const key = cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none";
-    const [rate, weights] = NOTICE_TABLE[key];
-    if (noticeRandom() >= rate) return;
-    let roll = noticeRandom() * (weights[0] + weights[1] + weights[2]);
-    let grade = 0;
-    while (grade < 2 && roll >= weights[grade]) { roll -= weights[grade]; grade += 1; }
-    api.abstractScene.notice(["normal", "express", "gold"][grade], noticeRandom() < 0.5 ? 1 : -1);
+    if (!api.abstractScene?.notice) return;
+    notices?.lever(cue, api.latestState?.stage || "");
   };
+  api.noticePush = () => Boolean(notices?.reveal());
+  api.noticePushArmed = () => Boolean(notices?.pushArmed());
 
   // CZ entry "発展": rush forward, black hold, the title flies into the
   // camera, then the CZ scene breaks in. Kept under two seconds.
@@ -528,6 +613,38 @@
       if (api.latestState) api.update(api.latestState);
     }, rushMs + 800);
     scheduleEffect(() => { api.developing = false; }, 2200);
+  };
+
+  // D10: hold the LCD while the drum lands, then show the result.
+  api.btLanding = (result, misses = 0) => {
+    const ms = window.ShibakuBTPresentation?.land?.(result, misses) || 0;
+    if (!ms) return 0;
+    const total = ms + 200;
+    const token = holdPresentation(total);
+    schedulePresentation(token, () => {
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, total);
+    return total;
+  };
+
+  // C8: each CZ tightens toward its last game; the last game darkens and shakes.
+  const CZ_BUILD_COLORS = { unko: 0x9fb0bb, baba: 0xffb43b, shibaku: 0xff5a2a };
+  api.czLever = (key, remaining) => {
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.remove("cz-final");
+    if (reducedMotion.matches || !Number.isFinite(remaining)) return;
+    const color = CZ_BUILD_COLORS[key] || 0xffb43b;
+    if (remaining > 1 && remaining <= 3) {
+      api.abstractScene?.pulse(.5 + (3 - remaining) * .5);
+      api.abstractScene?.impact?.({ strength: .15 + (3 - remaining) * .1, hold: 0, color, rays: 0, disturb: false });
+      fx("noticeStep", { level: 4 - remaining });
+    } else if (remaining === 1) {
+      panel?.classList.add("cz-final");
+      fx("czBuild", { duration: 1.8 });
+      api.abstractScene?.impact?.({ strength: .55, hold: .2, color, rays: .25, disturb: false });
+      api.abstractScene?.pulse(1.6);
+    }
   };
 
   api.bonusConfirmed = (bonusType) => {
@@ -572,15 +689,20 @@
     scheduleEffect(() => machineWindow?.classList.remove(className), hitNumber >= 3 ? 1800 : 1200);
   };
 
+  // The third sandwich blackout lifts shortly after the last stop; the LCD is
+  // held until then so the "BONUS確定" title plays its entry in full view.
+  const BABA_BLACKOUT_RELEASE_MS = 320;
   api.babaBonusReady = () => {
-    const token = holdPresentation(900);
+    const token = holdPresentation(BABA_BLACKOUT_RELEASE_MS);
     schedulePresentation(token, () => {
       api.clearBabaThirdHit();
       api.resultUntil = 0;
       if (api.latestState) api.update(api.latestState);
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: .9, hold: .04, color: 0xffd84a, rays: 1 });
       document.querySelector(".machine-window")?.classList.add("baba-bonus-ready-glow");
       scheduleEffect(() => document.querySelector(".machine-window")?.classList.remove("baba-bonus-ready-glow"), 1800);
-    }, 900);
+    }, BABA_BLACKOUT_RELEASE_MS);
   };
 
   api.clearBabaThirdHit = () => {
@@ -779,7 +901,7 @@
 
   api.clearChallengeFailure = (nextState = null) => {
     api.challengeFailureHeld = false;
-    glass.classList.remove("is-broken");
+    glass.clear();
     if (nextState) {
       api.lcdMode = visualMode(nextState);
       api.hue = api.lcdMode;
@@ -789,6 +911,7 @@
   };
 
   api.transition = (before, after) => {
+    document.querySelector(".machine-panel")?.classList.remove("cz-final");
     api.update(after);
     const modeChanged = before.mode !== after.mode || before.bonus?.type !== after.bonus?.type;
     const cruisingBell = before.mode === "at" && after.mode === "at" && after.displayRoleKey === "bell";
