@@ -776,6 +776,27 @@
     }, ms);
   });
 
+  // PRIVATE_SPEC: 3 lever silence / 4 third-stop delay rates by resolved result.
+  const LEVER_SILENCE_RATE = { win: .25, cz: .15, strong: .06, weak: .02, none: .006 };
+  const THIRD_STOP_DELAY_RATE = { win: .35, cz: .22, strong: .08, weak: .03, none: .01 };
+  const cueKey = (cue) => cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none";
+  api.leverSilenceRoll = (cue = {}) => cueRandom() < LEVER_SILENCE_RATE[cueKey(cue)];
+  api.thirdStopDelayRoll = (cue = {}) => cueRandom() < THIRD_STOP_DELAY_RATE[cueKey(cue)];
+
+  // 6: all-rotation premium (rarest). Returns how long the line holds (ms).
+  const ALL_ROTATION_RATE_ON_WIN = 0.01;
+  api.allRotationRoll = () => !reducedMotion.matches && cueRandom() < ALL_ROTATION_RATE_ON_WIN;
+  api.allRotation = () => {
+    notices?.clear();
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.add("notice-premium", "all-rotation");
+    document.querySelector(".machine-window")?.classList.add("notice-premium");
+    fx("allRotation");
+    api.abstractScene?.impact?.({ strength: 1, hold: 0, color: 0xffffff, rays: 1.2, disturb: false });
+    scheduleEffect(() => panel?.classList.remove("all-rotation"), 3300);
+    return 1300;
+  };
+
   // 5: premium reverse freeze. Returns how long the aligned sevens hold (ms).
   const REVERSE_FREEZE_RATE_ON_WIN = 0.03;
   api.reverseFreezeRoll = () => !reducedMotion.matches && cueRandom() < REVERSE_FREEZE_RATE_ON_WIN;

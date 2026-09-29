@@ -33,6 +33,7 @@
     lastLamp: {},
     premiumHit: {},
     reverseFreeze: {},
+    allRotation: {},
   };
 
   const files = new Map();   // name -> HTMLAudioElement (only when the file loaded)
@@ -277,6 +278,16 @@
       tone(ctx, out, { type: "sawtooth", f0: 55, f1: 110, t, dur: 2.5, peak: 0.12, attack: 2.2 });
       tone(ctx, out, { type: "sawtooth", f0: 55.6, f1: 111, t, dur: 2.5, peak: 0.12, attack: 2.2 });
       return 2.6;
+    },
+    allRotation(ctx, out, t) {
+      // A rising, accelerating arpeggio under a bright shimmer.
+      let at = t, gap = 0.14, step = 0;
+      while (at < t + 3.1) {
+        tone(ctx, out, { type: "square", f0: midi(72 + [0, 4, 7, 12][step % 4] + Math.floor(step / 8) * 2), t: at, dur: 0.1, peak: 0.07 });
+        at += gap; gap = Math.max(0.05, gap * 0.95); step += 1;
+      }
+      hiss(ctx, out, { t, dur: 3.2, peak: 0.12, attack: 3, type: "highpass", freq: 6000 });
+      return 3.3;
     },
     premiumHit(ctx, out, t) {
       [72, 76, 79, 84, 88].forEach((n, i) => tone(ctx, out, { type: "triangle", f0: midi(n), t: t + i * 0.06, dur: 1.2, peak: 0.12 }));

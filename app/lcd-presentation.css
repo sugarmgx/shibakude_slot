@@ -122,12 +122,12 @@ html.cab #battlePushButton.is-notice span { color: #10151a; background: radial-g
 
 /* F14 premium: rainbow sweep over LCD and lamps */
 .machine-panel.notice-premium .lcd-screen::after {
-  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; mix-blend-mode: screen;
-  background: linear-gradient(100deg, #ff004c88, #ff9d0088, #ffe60088, #2eff6a88, #00c8ff88, #7a5cff88, #ff00d488);
-  background-size: 300% 100%; animation: premiumSweep 900ms linear infinite, premiumFade 2.6s ease-out forwards;
+  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; mix-blend-mode: normal;
+  background: linear-gradient(100deg, #ff004c5c, #ff9d005c, #ffe6005c, #2eff6a5c, #00c8ff5c, #7a5cff5c, #ff00d45c);
+  opacity: 1; animation: premiumHue 700ms linear infinite, premiumFade 2.6s ease-out forwards;
 }
 .machine-window.notice-premium .cabinet-lights span { animation: noticeRainbow 400ms linear infinite; background: #ff3b6b !important; }
-@keyframes premiumSweep { to { background-position: 300% 0; } }
+@keyframes premiumHue { to { filter: hue-rotate(360deg); } }
 @keyframes premiumFade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 
 /* D11: one lamp left in the drum */
@@ -200,3 +200,8 @@ html.cab .machine-panel:has(.machine-window.lamp-sync)::after { filter: brightne
 @media (prefers-reduced-motion: reduce) {
   .machine-window[class*="reel-flash-"] .reel, .machine-window.lamp-fanfare .cabinet-lights span, #lcdSessionInfo.bump { animation: none !important; }
 }
+
+/* ---------- 6: all-rotation premium ---------- */
+.machine-panel.all-rotation .reel { animation: allRotationGlow 400ms linear infinite; }
+@keyframes allRotationGlow { 0% { filter: brightness(1.3) hue-rotate(0deg) saturate(1.6); } 100% { filter: brightness(1.3) hue-rotate(360deg) saturate(1.6); } }
+@media (prefers-reduced-motion: reduce) { .machine-panel.all-rotation .reel { animation: none; } }

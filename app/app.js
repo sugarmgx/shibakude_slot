@@ -2950,13 +2950,14 @@ function beginPendingSpin(afterState, force = null) {
   // LCD notice cue: what this game has already resolved to, handed to the
   // presentation layer only. The notice picks its own look with its own
   // random stream; the game lottery is never consumed or changed.
-  if (state.mode === "normal" && !middleCherryResult) {
-    window.ShibakuEffects?.noticeCue?.({
-      win: !["normal", "cz"].includes(afterState.mode),
-      cz: afterState.mode === "cz",
-      rare: isRareResult ? rareKind : "none",
-    });
-  }
+  const leverCue = state.mode === "normal" && !middleCherryResult
+    ? { win: !["normal", "cz"].includes(afterState.mode), cz: afterState.mode === "cz", rare: isRareResult ? rareKind : "none" }
+    : null;
+  if (leverCue) window.ShibakuEffects?.noticeCue?.(leverCue);
+  // 3 / 4: lever silence and a delayed third stop, drawn by the presentation
+  // layer from the already-resolved result.
+  const leverSilence = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.leverSilenceRoll?.(leverCue));
+  const thirdStopDelay = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.thirdStopDelayRoll?.(leverCue));
   ui.spinningReels = [true, true, true];
   ui.deceleratingReels = [false, false, false];
   ui.reelPositions = state.reelStops.map((stopIndex, reelIndex) => wrapIndex(stopIndex, REEL_STRIPS[reelIndex].length));
@@ -2978,6 +2979,7 @@ function beginPendingSpin(afterState, force = null) {
     ichikakuProbability,
     ichikakuReason: middleCherryResult ? "middleCherry" : btBonus ? "btBonus" : enteringBig ? "bigBonus" : null,
     fakeReach,
+    thirdStopDelay,
     finishPromise: null,
     finishResolver: null,
   };
@@ -2987,13 +2989,16 @@ function beginPendingSpin(afterState, force = null) {
 
   // 5: premium reverse freeze on a small share of normal-play wins
   // (presentation-only draw; the result is already fixed).
-  const reverseFreeze = state.mode === "normal"
+  // 6: the all-rotation premium is rarer still and takes precedence.
+  const premiumWin = state.mode === "normal"
     && afterState.mode === "bonusReady"
     && !middleCherryResult
-    && !ui.debugFast
-    && Boolean(window.ShibakuEffects?.reverseFreezeRoll?.());
-  if (reverseFreeze) {
-    runReverseFreeze(ui.pendingSpin, afterState.bonusReady?.type === "BLUE_BIG" ? "青7" : "赤7");
+    && !ui.debugFast;
+  const premiumSpin = premiumWin
+    ? (window.ShibakuEffects?.allRotationRoll?.() ? "all" : window.ShibakuEffects?.reverseFreezeRoll?.() ? "reverse" : null)
+    : null;
+  if (premiumSpin) {
+    runReverseFreeze(ui.pendingSpin, afterState.bonusReady?.type === "BLUE_BIG" ? "青7" : "赤7", premiumSpin);
   } else {
     startSpinLoop();
   }
@@ -3005,6 +3010,8 @@ function beginPendingSpin(afterState, force = null) {
   }
   if (ui.reelFreezeActive) {
     // The reverse freeze plays its own sound and starts the spin sound later.
+  } else if (leverSilence) {
+    // 3: no spin sound at all on the lever.
   } else if (fakeReach) {
     playSoundEffect("fakeReach");
   } else if (!reelSpinSuppressed) {
@@ -3013,6 +3020,8 @@ function beginPendingSpin(afterState, force = null) {
   document.documentElement.dataset.spinEffects = JSON.stringify({
     fakeReach,
     fakeReachRate,
+    leverSilence,
+    thirdStopDelay,
     reelSpinSuppressed,
     ichikakuArmed: ui.pendingSpin.ichikaku,
     ichikakuProbability,
@@ -3037,20 +3046,26 @@ function beginPendingSpin(afterState, force = null) {
 
 // Reels crawl backwards and settle with the seven lined up on the middle
 // row, hold, then the normal spin starts. Stops are locked meanwhile.
-async function runReverseFreeze(pending, symbol) {
+async function runReverseFreeze(pending, symbol, style = "reverse") {
   ui.reelFreezeActive = true;
   renderInteractivity();
-  const holdMs = window.ShibakuEffects?.reverseFreeze?.() || 0;
+  const allRotation = style === "all";
+  const holdMs = (allRotation ? window.ShibakuEffects?.allRotation?.() : window.ShibakuEffects?.reverseFreeze?.()) || 0;
+  if (allRotation) ui.reelOverrideSymbol = symbol;
   const starts = [...ui.reelPositions];
   const targets = REEL_STRIPS.map((strip, reelIndex) => {
     const index = strip.indexOf(symbol);
     return wrapIndex(index - 1, strip.length);
   });
+  // Reverse: crawl backwards about one turn. All-rotation: spin forwards
+  // fast in unison (every cell a seven) and brake into the line.
   const travel = targets.map((target, reelIndex) => {
     const length = REEL_STRIPS[reelIndex].length;
-    return wrapIndex(target - Math.floor(starts[reelIndex]), length) + length - (starts[reelIndex] % 1);
+    return allRotation
+      ? -(wrapIndex(Math.floor(starts[reelIndex]) - target, length) + (starts[reelIndex] % 1) + length * 4)
+      : wrapIndex(target - Math.floor(starts[reelIndex]), length) + length - (starts[reelIndex] % 1);
   });
-  const crawlMs = 2600;
+  const crawlMs = allRotation ? 3200 : 2600;
   const began = performance.now();
   await new Promise((resolve) => {
     const frame = (now) => {
@@ -3058,7 +3073,7 @@ async function runReverseFreeze(pending, symbol) {
       const t = Math.min(1, (now - began) / crawlMs);
       // Each reel finishes a little later, easing into the seven.
       ui.reelPositions = starts.map((start, reelIndex) => {
-        const local = Math.min(1, t * (1 + (2 - reelIndex) * 0.12));
+        const local = allRotation ? t : Math.min(1, t * (1 + (2 - reelIndex) * 0.12));
         const eased = 1 - (1 - local) ** 3;
         return wrapIndex(start + travel[reelIndex] * eased, REEL_STRIPS[reelIndex].length);
       });
@@ -3069,6 +3084,7 @@ async function runReverseFreeze(pending, symbol) {
     };
     requestAnimationFrame(frame);
   });
+  ui.reelOverrideSymbol = null;
   if (ui.pendingSpin !== pending) return;
   ui.reelPositions = [...targets];
   renderReels();
@@ -3519,6 +3535,7 @@ function recoverReelSpin(error, beforeState, phase) {
   ui.reelPositions = [...state.reelStops];
   ui.tamaFreezeActive = false;
   ui.reelFreezeActive = false;
+  ui.reelOverrideSymbol = null;
   ui.tamaFreezePromise = null;
   clearTimeout(ui.actionLockTimer);
   ui.actionLockedUntil = 0;
@@ -3558,6 +3575,11 @@ async function stopReelChecked(reelIndex) {
   const isThirdStop = pendingAtStart.nextStop === 2;
   pendingAtStart.resolving = true;
   window.ShibakuCabinet?.feedback("stop", reelIndex);
+  if (isThirdStop && pendingAtStart.thirdStopDelay) {
+    // 4: the button answers, the reel holds on a beat before it stops.
+    await sleep(320);
+    if (ui.pendingSpin !== pendingAtStart) return;
+  }
   const targetStop = selectControlledCandidate(reelIndex);
   if (state.mode === "tama") {
     ui.tamaFreezePromise = triggerTamaOpportunity(pendingAtStart.nextStop + 1);
@@ -4042,6 +4064,7 @@ function resetAll() {
   ui.battleRevealing = false;
   ui.battleCharging = false;
   ui.reelFreezeActive = false;
+  ui.reelOverrideSymbol = null;
   ui.battleFailureSound = null;
   ui.autoGeneration += 1;
   ui.mainActionPromise = null;
@@ -4097,15 +4120,17 @@ function renderReels() {
       const base = Math.floor(position);
       const frac = position - base;
       let cache = reelDomCache.get(reelNode);
-      if (!cache?.track || cache.base !== base) {
+      const override = ui.reelOverrideSymbol || null;
+      if (!cache?.track || cache.base !== base || cache.override !== override) {
         const track = document.createElement("div");
         track.className = "reel-track";
         for (let offset = 0; offset <= 5; offset += 1) {
-          const symbol = strip[wrapIndex(base + offset, strip.length)];
+          // 6: during the all-rotation premium every cell shows the seven.
+          const symbol = override || strip[wrapIndex(base + offset, strip.length)];
           track.appendChild(createSymbolNode(symbol, offset === 1));
         }
         reelNode.replaceChildren(track);
-        cache = { track, base };
+        cache = { track, base, override };
         reelDomCache.set(reelNode, cache);
       }
       const track = cache.track;
