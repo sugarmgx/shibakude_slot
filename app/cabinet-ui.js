@@ -443,6 +443,7 @@
         if (!(amount > 0)) return;
         const award = document.querySelector("#lcdBellAward");
         if (!award) return;
+        window.ShibakuEffects?.abstractScene?.boardBeat?.("bell");
         award.textContent = `＋${amount}枚`;
         const token = String((Number(award.dataset.token) || 0) + 1);
         award.dataset.token = token;
@@ -473,6 +474,7 @@
         });
       },
       feedback(kind, reelIndex) {
+        window.ShibakuEffects?.abstractScene?.boardBeat?.(kind, reelIndex);
         if (kind === "lever") consolePanel.querySelector("#maxBetButton").classList.remove("bet-prepared");
         if (reducedMotion.matches) return;
         const button = kind === "lever" ? spin.querySelector("button") : stopPanel.querySelector(`[data-stop="${reelIndex}"]`);

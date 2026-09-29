@@ -506,6 +506,8 @@
           cell.visible = !normalRoom || i < (name === 'hall' ? 4 : 5);
           cell.position.z=boostBlueLayer?2-((i*7+this.travel*1.12+3.5)%70):moving?5-((i*7+this.travel)%70):normalRoom?2-i*11:-i*7;
           cell.rotation.z=boostBlueLayer?Math.sin(time*.55+i*.7)*.13:name==="red"?time*.12+i*.2:name==="reg"?time*.08:0;
+          // Rings breathe with the BGM kick; the swell fades with distance down the tunnel.
+          if(moving){const kick=(o.music?.kick||0)*(o.music?.active||0);cell.scale.setScalar(1+kick*.055*Math.max(0,1-Math.abs(cell.position.z+6)/40));}else if(cell.scale.x!==1)cell.scale.setScalar(1);
           if(name==="baba")cell.children.forEach(part=>{
             if(part.userData.doorSide) {
               const target=part.userData.doorSide*(3.4+(i<Math.max(this.babaCueHits,o.scenery?.babaHits||0)?3:0));

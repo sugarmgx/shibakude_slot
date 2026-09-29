@@ -581,3 +581,12 @@ button:focus-visible { outline:2px solid #f1d29b;outline-offset:5px; }
 /* Hold beat before a release: lettering sinks with the panel, then snaps back. */
 .lcd-screen .lcd-copy { transition: filter 60ms ease-out; }
 .lcd-screen[data-impact-hold] .lcd-copy { filter: brightness(.3); transition: filter 140ms ease-in; }
+
+/* Bell-navi footer is reserved for the whole bonus, not toggled per spin. */
+.lcd-screen.bell-navi-zone .lcd-copy { padding-bottom: 72px; }
+@media (max-height: 850px) and (min-width: 981px) {
+  .lcd-screen.bell-navi-zone .lcd-copy { padding-top: 10px; padding-bottom: 55px; }
+}
+
+/* The panel carries no progress hairline or HUD corner brackets. */
+.lcd-screen .lcd-meter, .lcd-screen .lcd-corner { display: none !important; }

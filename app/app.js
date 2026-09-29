@@ -2335,6 +2335,14 @@ function ensureBonusMusicElements() {
   }
 }
 
+// Read-only presentation clock: lets the LCD pulse with the BGM that is
+// already audible. Never touches audio routing or game state.
+window.ShibakuMusicClock = () => {
+  const audio = ui.musicType ? ui.musicElements.get(ui.musicType) : null;
+  if (!audio || audio.paused) return null;
+  return { track: BONUS_MUSIC[ui.musicType].url.split("/").pop().split("?")[0], time: audio.currentTime };
+};
+
 function ensureSoundEffectElements() {
   for (const [key, config] of Object.entries(SOUND_EFFECTS)) {
     if (ui.sfxElements.has(key)) {

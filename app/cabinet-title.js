@@ -229,7 +229,7 @@
       else {
         const signature=text+'|'+(classes.match(/\bmode-[\w-]+/)||[''])[0];
         if(signature!==this.signature) {
-          this.signature=signature;this.group.clear();const shape=this.make(text);this.size=shape.size;this.startedAt=performance.now();
+          this.signature=signature;this.stamped=false;this.group.clear();const shape=this.make(text);this.size=shape.size;this.startedAt=performance.now();
           this.entryDelay=document.querySelector('.machine-window.bonus-confirmed') ? .65 : 0;
           this.letters=shape.letters.map((letter,index)=>{
             const pivot=new this.T.Group();this.group.add(pivot);
@@ -243,8 +243,19 @@
         if(box.width&&box.height){
           const fit=Math.min(Math.min(box.width*1.10,host.width*.92)/(this.size.x+24),Math.min(box.height*1.18,host.height*.46)/(this.size.y+24));
           const age=Math.max(0,(now-this.startedAt)/1000);
-          this.group.visible=true;this.group.scale.setScalar(fit);this.group.position.set(box.left-host.left+box.width/2,h-(box.top-host.top+box.height/2),0);this.group.rotation.set(-.06,.025,0);
-          for(const letter of this.letters){const elapsed=age-this.entryDelay-letter.delay;const t=reduced?1:Math.max(0,Math.min(1,elapsed/1.65));const remaining=Math.pow(1-t,6),p=letter.phase;letter.pivot.visible=reduced||elapsed>=0;letter.pivot.position.set(letter.x+Math.cos(p)*90*remaining,letter.y+Math.sin(p)*70*remaining,distance/fit*(.62+.05*Math.sin(p))*remaining);letter.pivot.rotation.set(Math.sin(p+.7)*1.6*remaining,Math.cos(p+.3)*1.8*remaining,Math.sin(p+1.4)*1.0*remaining);}
+          this.group.visible=true;this.group.scale.setScalar(fit);
+          // Follow layout changes (bell-navi footer etc.) with a glide, never a jump.
+          const targetX=box.left-host.left+box.width/2,targetY=h-(box.top-host.top+box.height/2);
+          if(!this.titlePos||age<.02||reduced)this.titlePos={x:targetX,y:targetY,at:now};
+          const follow=1-Math.exp(-Math.min(.1,(now-this.titlePos.at)/1000)*10);
+          this.titlePos.x+=(targetX-this.titlePos.x)*follow;this.titlePos.y+=(targetY-this.titlePos.y)*follow;this.titlePos.at=now;
+          this.group.position.set(this.titlePos.x,this.titlePos.y,0);this.group.rotation.set(-.06,.025,0);
+          // Letters travel in on their own paths, then land together on one line;
+          // the whole word stamps once so the landing reads as a single beat.
+          for(const letter of this.letters){const elapsed=age-this.entryDelay-letter.delay;const t=reduced?1:Math.max(0,Math.min(1,elapsed/1.05));const remaining=Math.pow(1-t,4),p=letter.phase;letter.pivot.visible=reduced||elapsed>=0;letter.pivot.position.set(letter.x+Math.cos(p)*90*remaining,letter.y+Math.sin(p)*70*remaining,distance/fit*(.62+.05*Math.sin(p))*remaining);letter.pivot.rotation.set(Math.sin(p+.7)*1.6*remaining,Math.cos(p+.3)*1.8*remaining,Math.sin(p+1.4)*1.0*remaining);}
+          const landed=age-this.entryDelay-(this.letters.length-1)*.065-1.05;
+          if(!reduced&&landed>0&&landed<.6)this.group.scale.multiplyScalar(1+Math.exp(-landed*9)*Math.sin(landed*28)*.035);
+          if(!reduced&&landed>0&&!this.stamped){this.stamped=true;this.owner.impact?.({strength:.32,hold:0,flash:.25,color:this.materials[2].color.getHex()});}
           if(classes.includes('bt-announcement')){
             const t=reduced?1:Math.max(0,Math.min(1,age/.65)),remaining=Math.pow(1-t,3);
             for(const letter of this.letters){

@@ -289,7 +289,9 @@
         `lcd-screen mode-${classMode}` +
         `${state.bannerTone ? ` tone-${state.bannerTone}` : ""}` +
         `${state.mode === "tama" ? " is-tama" : ""}` +
-        `${naviVisible ? " bell-navi-active" : ""}`;
+        `${naviVisible ? " bell-navi-active" : ""}` +
+        // Reserve the navi footer for the whole bonus so the title never jumps per game.
+        `${["bonus", "at", "tama"].includes(state.mode) ? " bell-navi-zone" : ""}`;
 
       screen.dataset.visualMode = mode;
 

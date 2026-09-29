@@ -146,7 +146,9 @@
       this.createBonusTunnel();
       this.createBoostStreaks();
       this.createForegroundShutters();
+      this.music = window.LcdMusicPulse ? new window.LcdMusicPulse() : { update() { return this; }, kick: 0, level: 0, active: 0 };
       this.cabinetWorld = new window.CabinetWorld(this);
+      this.atmosphere = window.LcdAtmosphere ? new window.LcdAtmosphere(this) : null;
       this.createPostPipeline();
       this.title3D = window.CabinetTitle ? new window.CabinetTitle(this) : null;
       window.loadCabinetHDRI?.(this);
@@ -649,7 +651,9 @@
             vec4 previous = texture2D(uPrevious, previousUv);
             vec3 previousWide = texture2D(uPrevious, wideUv).rgb;
             float retainMask = smoothstep(0.08, 0.92, hash(floor(vUv * vec2(43.0, 17.0)) + floor(uTime * 0.7)) + uFeedback * 0.42);
-            float retain = uFeedback * (0.44 + retainMask * 0.45) * (1.0 - uCut * 0.86);
+            // Echoes zoom toward the vanishing point; keep them from stacking into a white core.
+            float centreGuard = mix(0.2, 1.0, smoothstep(0.03, 0.3, length(center * vec2(1.6, 1.0))));
+            float retain = uFeedback * (0.44 + retainMask * 0.45) * (1.0 - uCut * 0.86) * centreGuard;
             vec3 echo = previous.rgb * (0.91 - uFeedback * 0.12);
             float wideRetain = uFeedback * uFeedback * (0.10 + retainMask * 0.12) * (1.0 - uCut);
             vec3 color = current.rgb + echo * retain + previousWide * wideRetain;
@@ -926,6 +930,11 @@
           uHold: { value: 0 },
           uFlash: { value: 0 },
           uRays: { value: 0 },
+          uRipple: { value: new THREE.Vector2(99, 0) },
+          uStop: { value: new THREE.Vector3(0.5, 99, 0) },
+          uContrast: { value: 0 },
+          uTint: { value: new THREE.Vector3(1, 1, 1) },
+          uPulse: { value: 0 },
         },
         vertexShader,
         fragmentShader: `
@@ -945,6 +954,11 @@
           uniform float uHold;
           uniform float uFlash;
           uniform float uRays;
+          uniform vec2 uRipple;
+          uniform vec3 uStop;
+          uniform float uContrast;
+          uniform vec3 uTint;
+          uniform float uPulse;
 
           vec3 sampleScene(vec2 uv) { return texture2D(uScene, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
           vec3 sampleBloom(vec2 uv) { return texture2D(uBloom, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
@@ -964,7 +978,10 @@
             float live = uImpactStrength * (1.0 - smoothstep(0.0, 1.15, uImpactAge));
             float radius = uImpactAge * 2.1;
             float ring = exp(-pow((dist - radius) / 0.075, 2.0)) * live;
-            vec2 warped = uv - dir * ring * 0.032 * uWarp;
+            // Lever-on: a thin, quick ripple runs outward from the centre.
+            float rippleLive = uRipple.y * (1.0 - smoothstep(0.0, 0.8, uRipple.x));
+            float ripple = exp(-pow((dist - uRipple.x * 1.7) / 0.045, 2.0)) * rippleLive;
+            vec2 warped = uv - dir * (ring * 0.032 + ripple * 0.01) * uWarp;
             float fringe = (0.0042 * live * exp(-uImpactAge * 3.2) + ring * 0.006) * uWarp + uHold * 0.0014;
             vec3 color = vec3(
               sampleScene(warped + dir * fringe).r,
@@ -972,6 +989,9 @@
               sampleScene(warped - dir * fringe).b
             );
             color *= 1.0 - uHold * (0.5 + 0.42 * smoothstep(0.12, 0.85, dist));
+            vec3 graded = clamp(color, 0.0, 1.0);
+            graded = graded * graded * (3.0 - 2.0 * graded);
+            color = mix(color, graded, uContrast) * uTint * (1.0 + uPulse);
             color += sampleBloom(warped) * uBloomStrength;
             if (uRays > 0.001) {
               vec3 rays = vec3(0.0);
@@ -986,6 +1006,10 @@
               color += rays * 0.08 * uRays;
             }
             color += uImpactColor * ring * 0.5;
+            color += vec3(0.75, 0.88, 1.0) * ripple * 0.07;
+            // Reel stop: a soft light column over the reel that just stopped.
+            float column = exp(-pow((vUv.x - uStop.x) / 0.075, 2.0)) * uStop.z * exp(-uStop.y * 7.0);
+            color += color * column * 0.32 + vec3(1.0, 0.96, 0.9) * column * 0.035;
             color += mix(vec3(1.0), uImpactColor, 0.35) * uFlash;
             gl_FragColor = vec4(shoulder(color), 1.0);
           }
@@ -1009,6 +1033,15 @@
       if (samples && this.renderer.capabilities.isWebGL2) target.samples = samples;
       this.renderTargets.push(target);
       return target;
+    }
+
+    // Visible board actions (lever, reel stops, bell payout) nudge the panel.
+    boardBeat(kind, reelIndex = 0) {
+      const now = performance.now();
+      this.board ||= {};
+      if (kind === "lever") this.board.rippleAt = now;
+      else if (kind === "stop") { this.board.stopAt = now; this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5; }
+      this.atmosphere?.board(kind);
     }
 
     // Starts a hold → release beat. `hold` seconds of darkening and a slow
@@ -1064,7 +1097,18 @@
         }
         uniforms.uImpactColor.value.copy(fx.color);
       }
-      if (reduced) { zoom = 1; shake = 0; flash *= 0.4; }
+      const kick = this.music.kick * this.music.active;
+      bloom += kick * 0.1;
+      const board = this.board || {};
+      const rippleAge = board.rippleAt ? (now - board.rippleAt) / 1000 : 99;
+      const stopAge = board.stopAt ? (now - board.stopAt) / 1000 : 99;
+      uniforms.uRipple.value.set(rippleAge, rippleAge < 1 ? 1 : 0);
+      uniforms.uStop.value.set(board.stopX ?? 0.5, stopAge, stopAge < 1 ? 1 : 0);
+      const grade = this.atmosphere?.grade;
+      uniforms.uContrast.value = grade ? grade.contrast : 0;
+      if (grade) uniforms.uTint.value.copy(grade.tint);
+      uniforms.uPulse.value = kick * 0.05;
+      if (reduced) { zoom = 1; shake = 0; flash *= 0.4; uniforms.uRipple.value.y = 0; }
       uniforms.uWarp.value = reduced ? 0 : 1;
       uniforms.uBloomStrength.value = bloom;
       uniforms.uImpactAge.value = age;
@@ -1445,7 +1489,8 @@
       });
       if (this.slabs[0]) {
         this.slabs[0].material.color.copy(this.theme.primary);
-        this.slabs[0].material.opacity = 0.05 + density * 0.19;
+        // Solid slabs read as clutter over the ring tunnel; thin them out there.
+        this.slabs[0].material.opacity = (0.05 + density * 0.19) * (1 - this.presentationWeights.bonus * 0.7);
       }
 
       this.veilMaterial.uniforms.uTime.value = time;
@@ -1553,6 +1598,7 @@
       this.eventPulse = Math.max(0, this.eventPulse - dt * 1.4);
       this.updateTheme(now);
       this.updatePresentation(dt);
+      this.music.update(dt);
       const dynamics = this.options.getDynamics?.();
       if (dynamics) this.setEnergy(dynamics.intensity, dynamics.burst);
       this.updateCamera(phase, quiet ? elapsed * .03 : elapsed);
@@ -1561,6 +1607,12 @@
       this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));
       if (this.battleEnabled) visual.disorder *= .3;
       this.cabinetWorld?.update(dt, elapsed);
+      const musicKick = this.music.kick * this.music.active;
+      if (musicKick > 0.01 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        this.camera.fov -= musicKick * 1.3;
+        this.camera.updateProjectionMatrix();
+      }
+      this.atmosphere?.update(dt, runningTime, this.music);
       const structureClarity = this.presentation.kind === 'normal'
         ? (['同人音楽即売会','クラブのラウンジ'].includes(this.scenery?.stage) ? 1 : 0)
         : this.presentation.kind === 'boost' ? .65 : .82;
