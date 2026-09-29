@@ -293,6 +293,7 @@
         `${naviVisible ? " bell-navi-active" : ""}` +
         // Reserve the navi footer for the whole bonus so the title never jumps per game.
         `${["bonus", "at", "tama"].includes(state.mode) ? " bell-navi-zone" : ""}`;
+      syncRegMovie(screen, state);
 
       screen.dataset.visualMode = mode;
 
@@ -372,6 +373,32 @@
 
       document.documentElement.dataset.lcdMode = mode;
     }
+  // REG bonus: the LCD shows the looped REG movie (muted; the BGM plays on).
+  let regMovie = null;
+  function syncRegMovie(screen, state) {
+    const on = state.mode === "bonus" && state.bonus?.type === "REG";
+    if (on && !regMovie) {
+      regMovie = document.createElement("video");
+      regMovie.className = "lcd-reg-video";
+      regMovie.muted = true;
+      regMovie.loop = true;
+      regMovie.playsInline = true;
+      regMovie.preload = "auto";
+      regMovie.setAttribute("aria-hidden", "true");
+      regMovie.src = "./assets/video/reg-movie.mp4";
+      document.querySelector("#lcdStage")?.after(regMovie);
+    }
+    if (!regMovie) return;
+    screen.classList.toggle("reg-movie", on);
+    if (on) {
+      regMovie.hidden = false;
+      if (regMovie.paused) regMovie.play()?.catch?.(() => {});
+    } else if (!regMovie.hidden) {
+      regMovie.hidden = true;
+      regMovie.pause();
+    }
+  }
+
   api.update = (state) => {
     if (!state) return;
     if(state.mode!=="normal"||(api.latestState&&api.latestState.stage!==state.stage))normalCue.cancel();
@@ -438,14 +465,61 @@
   // After the final game: a charge (pushCharge) and then, together with the
   // decide sound, PUSH. An abnormal PUSH (huge or red) mostly means a win.
   const PUSH_ABNORMAL_RATE = { won: 0.30, lost: 0.02 };
+  // PRIVATE_SPEC: the kankutsu plate replaces PUSH on 20% of wins only.
+  const PUSH_KANKUTSU_RATE_ON_WIN = 0.20;
+  // Infinite concentric rings flowing outward from the centre, accelerating
+  // for as long as the charge lasts. Returns a stop function.
+  function chargeRings(screen) {
+    if (!screen || reducedMotion.matches) return () => {};
+    const canvas = document.createElement("canvas");
+    canvas.className = "lcd-charge-rings";
+    canvas.setAttribute("aria-hidden", "true");
+    screen.append(canvas);
+    const ctx = canvas.getContext("2d");
+    const rect = screen.getBoundingClientRect();
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    const cx = canvas.width * 0.5, cy = canvas.height * 0.52;
+    const reach = Math.hypot(canvas.width, canvas.height) * 0.55;
+    const spacing = 34 * dpr;
+    const start = performance.now();
+    let last = start, offset = 0, raf = 0;
+    const tick = (now) => {
+      if (!canvas.isConnected) return;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const t = (now - start) / 1000;
+      const speed = 45 * dpr * Math.pow(2.3, t);
+      offset = (offset + speed * dt) % spacing;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const heat = Math.min(1, t / 3.4);
+      for (let r = offset; r < reach; r += spacing) {
+        const edge = 1 - r / reach;
+        ctx.strokeStyle = `rgba(255,${Math.round(225 - heat * 60)},${Math.round(150 - heat * 90)},${(Math.min(1, r / (spacing * 2)) * edge * (0.35 + heat * 0.55)).toFixed(3)})`;
+        ctx.lineWidth = (1.5 + heat * 3) * dpr * (0.6 + edge * 0.6);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); canvas.remove(); };
+  }
+  let stopChargeRings = () => {};
+  const kankutsuPlate = () => document.querySelector("#lcdScreen .lcd-kankutsu");
   api.battleCharge = ({ won } = {}) => new Promise((resolve) => {
     const generation = effectGeneration;
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) world.waiting = true;
-    const abnormal = cueRandom() < (won ? PUSH_ABNORMAL_RATE.won : PUSH_ABNORMAL_RATE.lost);
-    const style = abnormal ? (cueRandom() < 0.5 ? "huge" : "red") : "normal";
-    setScreen("lcd-screen mode-challenge battle-charge");
+    const kankutsu = Boolean(won) && cueRandom() < PUSH_KANKUTSU_RATE_ON_WIN;
+    const abnormal = kankutsu || cueRandom() < (won ? PUSH_ABNORMAL_RATE.won : PUSH_ABNORMAL_RATE.lost);
+    const style = kankutsu ? "kankutsu" : abnormal ? (cueRandom() < 0.5 ? "huge" : "red") : "normal";
+    const screen = setScreen("lcd-screen mode-challenge battle-charge");
+    stopChargeRings();
+    stopChargeRings = chargeRings(screen);
     pushButton()?.classList.add("is-charging");
     const charge = fx(abnormal ? "pushChargeHot" : "pushCharge");
     const started = performance.now();
@@ -461,8 +535,10 @@
     const ceiling = new Promise((done) => window.setTimeout(done, 5200));
     Promise.race([Promise.all([charge?.ended || Promise.resolve(), minimum]), ceiling]).then(() => {
       pushButton()?.classList.remove("is-charging");
+      stopChargeRings();
       if (generation !== effectGeneration) return resolve(null);
-      fx(abnormal ? "decideButtonHot" : "decideButton");
+      // The kankutsu plate always comes with its own success sound.
+      fx(kankutsu ? "pushKankutsu" : abnormal ? "decideButtonHot" : "decideButton");
       api.battlePush(style);
       resolve(style);
     });
@@ -471,13 +547,21 @@
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) world.waiting = true;
-    setScreen(`lcd-screen mode-challenge battle-push${style === "huge" ? " push-huge" : style === "red" ? " push-red" : ""}`, "PUSH");
-    pushButton()?.classList.toggle("is-hot", style === "red");
+    const screen = setScreen(`lcd-screen mode-challenge battle-push${style === "huge" ? " push-huge" : style === "red" ? " push-red" : style === "kankutsu" ? " push-kankutsu" : ""}`, "PUSH");
+    kankutsuPlate()?.remove();
+    if (style === "kankutsu" && screen) {
+      const plate = document.createElement("img");
+      plate.className = "lcd-kankutsu";
+      plate.src = "./assets/images/kankutsu.png";
+      plate.alt = "";
+      screen.append(plate);
+    }
+    pushButton()?.classList.toggle("is-hot", style === "red" || style === "kankutsu");
     flash(style === "red" ? "warning" : "accent");
     api.abstractScene?.impact?.({
       strength: style === "normal" ? .25 : .6,
       hold: 0,
-      color: style === "red" ? 0xff2a1f : 0xfff0c0,
+      color: style === "red" ? 0xff2a1f : style === "kankutsu" ? 0xffe600 : 0xfff0c0,
       rays: style === "normal" ? .15 : .7,
       disturb: false,
     });
@@ -488,6 +572,7 @@
   const REVIVAL_RATE = 0.2;
   api.battleRevivalRoll = () => !reducedMotion.matches && cueRandom() < REVIVAL_RATE;
   api.battleRevival = () => new Promise((resolve) => {
+    kankutsuPlate()?.remove();
     const generation = effectGeneration;
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
@@ -507,6 +592,7 @@
     window.setTimeout(() => resolve(generation === effectGeneration), 1500);
   });
   api.battleReveal = (won, options = {}) => {
+    kankutsuPlate()?.remove();
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.outcome = won; world.beatAt = performance.now(); }
@@ -529,6 +615,8 @@
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.waiting = false; world.outcome = null; }
     pushButton()?.classList.remove("is-charging", "is-hot");
+    stopChargeRings();
+    kankutsuPlate()?.remove();
     if (!preserveGlass) glass.clear();
   };
 

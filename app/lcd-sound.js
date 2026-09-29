@@ -15,6 +15,8 @@
     pushChargeHot: { fallback: "pushCharge" },
     decideButton: {},
     decideButtonHot: { fallback: "decideButton" },
+    // Shipped file that must always play (no synth stand-in).
+    pushKankutsu: { required: true },
     glassBreak: {},
     glassBreak2: {},
     revival: {},
@@ -317,6 +319,12 @@
       if (!slot || !host.enabled()) return silent(name);
       const gain = (slot.gain ?? 1) * (options.gain ?? 1);
       if (files.has(name)) return playFile(name, gain);
+      if (slot.required) {
+        // Not probed yet (e.g. still queued behind the BGM): play it directly.
+        const audio = new Audio(`${FX_DIR}${name}.mp3`);
+        files.set(name, audio);
+        return playFile(name, gain);
+      }
       if (slot.fallback && files.has(slot.fallback)) return playFile(slot.fallback, gain);
       return playSynth(name, gain, options) || silent(name);
     },

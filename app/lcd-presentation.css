@@ -10,11 +10,11 @@
 /* ---------- しばく: charge before PUSH ---------- */
 .lcd-screen.battle-charge::before {
   content: ""; position: absolute; inset: 0; z-index: 11; pointer-events: none; mix-blend-mode: normal;
-  background:
-    radial-gradient(circle at 50% 52%, transparent 0 16%, #000a 55%, #000 100%),
-    repeating-radial-gradient(circle at 50% 52%, #fff0 0 18px, #ffd98a66 19px 22px, #fff0 23px 46px);
-  animation: chargeGather 900ms cubic-bezier(.5, 0, .9, .4) infinite, chargeTighten 3.5s ease-in forwards;
+  background: radial-gradient(circle at 50% 52%, transparent 0 16%, #000a 55%, #000 100%);
+  animation: chargeTighten 3.5s ease-in forwards;
 }
+/* Concentric rings flowing outward, accelerating (drawn by visual-effects). */
+.lcd-charge-rings { position: absolute; inset: 0; z-index: 11; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
 .lcd-screen.battle-charge::after {
   content: ""; position: absolute; left: 50%; top: 52%; z-index: 11; width: 18px; height: 18px; margin: -9px 0 0 -9px;
   border-radius: 50%; pointer-events: none; opacity: 1;
@@ -23,12 +23,16 @@
   animation: chargeCore 3.5s ease-in forwards;
 }
 .lcd-screen.battle-charge { animation: chargeShake 70ms steps(2, end) infinite; animation-delay: 1.8s; }
-@keyframes chargeGather { from { background-size: 100% 100%, 260% 260%; background-position: center, center; } to { background-size: 100% 100%, 100% 100%; } }
 @keyframes chargeTighten { from { opacity: .55; } to { opacity: 1; } }
 @keyframes chargeCore { 0% { transform: scale(.4); opacity: .3; } 85% { transform: scale(5); opacity: 1; } 100% { transform: scale(7); opacity: 1; } }
 @keyframes chargeShake { 50% { transform: translate(1px, -1px); } }
 
-/* PUSH: normal, abnormally huge, abnormally red */
+/* PUSH: normal, abnormally huge, abnormally red, and the kankutsu plate */
+.lcd-kankutsu { position: absolute; left: 50%; top: 50%; z-index: 13; width: 78%; transform: translate(-50%, -50%); pointer-events: none;
+  filter: drop-shadow(0 0 18px #ffe600) drop-shadow(0 8px 0 #000); animation: kankutsuSlam 420ms cubic-bezier(.2, 1.7, .4, 1) both, kankutsuGlow 520ms ease-in-out 420ms infinite alternate; }
+.lcd-screen.push-kankutsu .lcd-title { visibility: hidden; }
+@keyframes kankutsuSlam { from { transform: translate(-50%, -50%) scale(3); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+@keyframes kankutsuGlow { to { filter: drop-shadow(0 0 34px #fff27a) drop-shadow(0 8px 0 #000); } }
 .lcd-screen.battle-push .lcd-title { animation: pushLamp 900ms ease-in-out infinite alternate, pushArrive 260ms cubic-bezier(.2, 1.6, .4, 1) both; }
 .lcd-screen.battle-push.push-huge .lcd-title {
   font-size: clamp(150px, 22vw, 290px); line-height: .8; letter-spacing: -.02em;
@@ -138,5 +142,11 @@ html.cab #battlePushButton.is-notice span { color: #10151a; background: radial-g
 @media (prefers-reduced-motion: reduce) {
   .lcd-screen.battle-charge, .lcd-screen.battle-charge::before, .lcd-screen.battle-charge::after,
   .machine-panel.cz-final .lcd-screen, .machine-panel.cz-final .lcd-screen::before, .machine-panel.last-lamp .lcd-screen::before,
-  .lcd-screen.battle-push .lcd-title, .machine-panel.notice-premium .lcd-screen::after { animation: none; }
+  .lcd-screen.battle-push .lcd-title, .machine-panel.notice-premium .lcd-screen::after, .lcd-kankutsu { animation: none; }
 }
+
+/* REG bonus: looped movie under the LCD copy */
+.lcd-reg-video { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.lcd-reg-video[hidden] { display: none; }
+.lcd-screen.bonus-result .lcd-reg-video { display: none; }
+.lcd-screen.reg-movie #lcdTitle.has-3d-title .lcd-ink-face { opacity: 1; }
