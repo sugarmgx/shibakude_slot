@@ -12,6 +12,31 @@
   const BONUS_TUNNEL_FRAMES = 30;
   const BOOST_STREAK_COUNT = 96;
   const PRESENTATION_KEYS = ["normal", "challenge", "bonus", "boost"];
+  // Normal-stage camera angles: [pos x, y, z, look x, y, z, fov, dolly x, y, z].
+  const SHOT_SECONDS = 15;
+  const NORMAL_SHOTS = {
+    station: [
+      [0, -0.6, 10, 0, -0.3, -30, 50, 0, 0, -3],
+      [3.5, -1.65, 8, -0.6, 0.2, -25, 58, -0.8, 0, -1.5],
+      [-6.1, -0.9, 6, 1.4, -0.9, -18, 48, 0, 0, -2.5],
+      [1.2, 2.5, 9, -0.5, -1.5, -14, 55, -1.2, 0, -1],
+      [-1.8, -1.25, 4, 2.4, -0.6, -22, 34, 0, 0, -1.5],
+    ],
+    hall: [
+      [0, -1.6, 8, 0, -1.3, -30, 50, 0, 0, -3],
+      [-2.5, 2.1, 6, 1, -2.5, -16, 55, 1.2, 0, -1],
+      [1.1, -2.7, 6, -0.6, -2.2, -22, 50, 0, 0.2, -2],
+      [0, -2.0, 12, 0, -1.6, -24, 62, 0, 0, -2],
+      [-3.9, -1.8, 3, -3.3, -2.2, -25, 32, 0, 0, -1.5],
+    ],
+    lounge: [
+      [0, -1.8, 8, 0, -2.1, -30, 50, 0, 0, -3],
+      [1.2, -3.3, 5, -0.5, -2.7, -20, 55, -0.6, 0, -1.5],
+      [-2.4, -2.6, 3, 2.3, -2.9, -14, 45, 0, 0, -1.5],
+      [0, 1.7, 7, 0, -3.0, -16, 60, 0, 0, -1.2],
+      [3.7, -1.3, 2, 4.5, -1.1, -24, 30, 0, 0, -1.5],
+    ],
+  };
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const smooth = (value) => value * value * (3 - 2 * value);
@@ -1143,11 +1168,7 @@
         this.board.stopAt = now;
         this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5;
         this.board.stops = (this.board.stops || 0) + 1;
-        if (this.board.stops === 3 && !reduced) {
-          // Third stop: the picture holds for a beat; the camera work carries on
-          // from where it was (no re-framing).
-          this.freezeUntil = now + 130;
-        }
+        // The picture never holds on a stop: the LCD keeps running.
       }
       this.atmosphere?.board(kind);
     }
@@ -1199,6 +1220,24 @@
     // Bonus result: the camera pulls back out of the tunnel while counting.
     resultPullout(durationMs = 4000) {
       this.pulloutFx = { at: performance.now(), duration: Math.min(4, durationMs / 1000) };
+    }
+
+    // Normal stages: five authored angles per stage, cut every 15 seconds on
+    // the wall clock alone (no lever / button input involved), each with a
+    // slow dolly across its 15 seconds.
+    applyNormalShot(now) {
+      if (this.presentation.kind !== "normal" || this.presentationWeights.normal < 0.5 || !this.cabinetWorld?.stageKit) return;
+      const stage = this.scenery?.stage;
+      const key = stage === "同人音楽即売会" ? "hall" : stage === "クラブのラウンジ" ? "lounge" : "station";
+      const shots = NORMAL_SHOTS[key];
+      const slot = Math.floor(now / SHOT_SECONDS / 1000);
+      const [px, py, pz, lx, ly, lz, fov, dx, dy, dz] = shots[slot % shots.length];
+      const t = smooth((now / 1000 % SHOT_SECONDS) / SHOT_SECONDS);
+      const sx = key === "station" ? 1 : this.cabinetWorld.structures[key]?.group.scale.x || 1;
+      this.camera.position.set((px + dx * t) * sx, py + dy * t, pz + dz * t);
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+      this.camera.lookAt((lx + dx * t * 0.5) * sx, ly + dy * t * 0.5, lz + dz * t);
     }
 
     applyCameraMoves(now, dt) {
@@ -1313,12 +1352,13 @@
       uniforms.uTime.value = now / 1000;
       uniforms.uAnamorphic.value = 0.22 * weights.normal + 0.26 * weights.challenge + 0.24 * weights.bonus + 0.3 * weights.boost
         + (fx && fx.released ? fx.strength * 0.5 * Math.exp(-age * 2.5) : 0) + kick * 0.12 + (this.rushAmount || 0) * 0.35;
-      uniforms.uFloor.value = weights.bonus;
+      uniforms.uFloor.value = this.lowQuality ? 0 : weights.bonus;
+      if (this.lowQuality) uniforms.uAnamorphic.value *= 0.5;
       const wipeAge = this.wipe ? (now - this.wipe.at) / 1000 : 99;
       uniforms.uWipe.value = reduced ? 1 : clamp(wipeAge / (this.wipe?.type === 3 ? 0.8 : 0.55), 0, 1);
       if (this.wipe) uniforms.uWipeType.value = this.wipe.type;
       const display = this.displayMaterial.uniforms;
-      display.uDof.value = reduced ? 0 : 0.45 * weights.normal + 0.6 * weights.challenge + 0.75 * weights.bonus + 0.5 * weights.boost;
+      display.uDof.value = reduced || this.lowQuality ? 0 : 0.45 * weights.normal + 0.6 * weights.challenge + 0.75 * weights.bonus + 0.5 * weights.boost;
       display.uFocus.value = 0.1 * weights.normal + 0.09 * weights.challenge + 0.06 * weights.bonus + 0.08 * weights.boost;
       if (reduced) { zoom = 1; shake = 0; flash *= 0.4; uniforms.uRipple.value.y = 0; }
       uniforms.uWarp.value = reduced ? 0 : 1;
@@ -1371,10 +1411,26 @@
 
     // Colour the cabinet lamps with the light the panel is actually emitting:
     // a tiny left / centre / right read of the bloom chain every few frames.
+    // Colour the cabinet lamps with the light the panel is actually emitting:
+    // a tiny left / centre / right read of the bloom chain. The read is
+    // asynchronous (pixel-pack buffer + fence) so the GPU never stalls the
+    // frame; without WebGL2 the lamps follow the theme colour instead.
     sampleGlow(now) {
-      if (now - (this.glowSampledAt || 0) < 90) return;
+      const renderer = this.renderer, gl = renderer.getContext();
+      const async = renderer.capabilities.isWebGL2 && typeof gl.fenceSync === "function";
+      if (this.glowFence) {
+        const status = gl.clientWaitSync(this.glowFence, 0, 0);
+        if (status === gl.TIMEOUT_EXPIRED) return;
+        gl.deleteSync(this.glowFence);
+        this.glowFence = null;
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.glowPixels);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        this.applyGlow();
+      }
+      if (now - (this.glowSampledAt || 0) < 120) return;
       this.glowSampledAt = now;
-      const renderer = this.renderer;
+      if (!async) { this.glowPixels.fill(0); this.applyGlow(); return; }
       this.fxQuad.material = this.bloomDownMaterial;
       const source = this.bloomTargets[3];
       this.bloomDownMaterial.uniforms.uTexture.value = source.texture;
@@ -1382,9 +1438,20 @@
       this.bloomDownMaterial.uniforms.uPrefilter.value = 0;
       renderer.setRenderTarget(this.glowTarget);
       renderer.render(this.fxScene, this.postCamera);
+      if (!this.glowPbo) {
+        this.glowPbo = gl.createBuffer();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, this.glowPixels.byteLength, gl.STREAM_READ);
+      }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+      gl.readPixels(0, 0, 8, 2, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      this.glowFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       renderer.setRenderTarget(null);
       this.fxQuad.material = this.impactMaterial;
-      try { renderer.readRenderTargetPixels(this.glowTarget, 0, 0, 8, 2, this.glowPixels); } catch (_) { return; }
+    }
+
+    applyGlow() {
       const px = this.glowPixels, base = this.theme.primary;
       const zone = (from, to) => {
         let r = 0, g = 0, b = 0, n = 0;
@@ -1399,6 +1466,54 @@
       root.setProperty("--glow-c", centre.join(" "));
       root.setProperty("--glow-r", right.join(" "));
       root.setProperty("--glow-i", level.toFixed(3));
+    }
+
+    // Compile every shader and upload every texture up front, once per light
+    // configuration a stage can show, so no scene change stalls on first use.
+    warmup() {
+      if (this.disposed) return;
+      const renderer = this.renderer, world = this.cabinetWorld;
+      const hidden = [];
+      const reveal = object => { if (!object.visible) { hidden.push(object); object.visible = true; } };
+      try {
+        // Light-free presentation layers can be visible for every pass.
+        [this.world, this.challengeField, this.bonusTunnel, this.boostStreaks, this.atmosphere?.group].forEach(o => o && reveal(o));
+        this.atmosphere?.group.traverse(reveal);
+        const structures = Object.values(world?.structures || {}).map(profile => profile.group);
+        const configurations = [world?.stationStage, ...structures].filter(Boolean);
+        for (const active of configurations) {
+          for (const group of configurations) group.visible = group === active;
+          active.traverse(object => { if (object !== active && !object.visible) { hidden.push(object); object.visible = true; } });
+          renderer.compile(this.scene, this.camera);
+        }
+        for (const texture of this.textures) renderer.initTexture?.(texture);
+        this.title3D?.warm?.(renderer);
+      } catch (error) {
+        console.warn("描画の事前準備に失敗しました", error);
+      } finally {
+        hidden.forEach(object => { object.visible = false; });
+      }
+    }
+
+    // Keep the LCD fluid on slower GPUs: step the render resolution down once
+    // frames run long, then drop the costliest optical passes.
+    adaptQuality(now, frameMs) {
+      this.qualitySamples ||= [];
+      this.qualitySamples.push(frameMs);
+      if (now - (this.qualityCheckedAt || 0) < 2500) return;
+      this.qualityCheckedAt = now;
+      const samples = this.qualitySamples.sort((a, b) => a - b);
+      this.qualitySamples = [];
+      const typical = samples[Math.floor(samples.length * 0.75)] || 0;
+      if (typical < 24 || document.hidden) return;
+      const ratio = this.renderer.getPixelRatio();
+      if (ratio > 1.01) {
+        this.renderer.setPixelRatio(Math.max(1, ratio - 0.25));
+        this.forceResize = true;
+        this.resize();
+      } else if (!this.lowQuality) {
+        this.lowQuality = true;
+      }
     }
 
     captureTransition(type) {
@@ -1448,7 +1563,8 @@
 
       const bufferWidth = Math.max(2, Math.floor(width * FEEDBACK_SCALE));
       const bufferHeight = Math.max(2, Math.floor(height * FEEDBACK_SCALE));
-      if (!this.sceneTarget || this.sceneTarget.width !== bufferWidth || this.sceneTarget.height !== bufferHeight) {
+      if (this.forceResize || !this.sceneTarget || this.sceneTarget.width !== bufferWidth || this.sceneTarget.height !== bufferHeight) {
+        this.forceResize = false;
         this.renderTargets.forEach((target) => target.dispose());
         this.renderTargets = [];
         this.sceneTarget = this.makeRenderTarget(bufferWidth, bufferHeight, true);
@@ -1823,6 +1939,7 @@
     renderFrame(now) {
       if (!this.running || this.disposed) return;
       const frozen = Boolean(this.freezeUntil && now < this.freezeUntil);
+      this.adaptQuality(now, now - this.previousAt);
       const frameDt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
       if (frozen) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000;
       const dt = frozen ? 0.0001 : frameDt;
@@ -1860,7 +1977,7 @@
             feedback: upperBoost ? .24 : .18,
             exposure: upperBoost ? .98 : .92,
           }
-          : phaseAt(quiet ? .04 : cycleProgress);
+          : phaseAt(quiet || (this.presentation.kind === "normal" && this.cabinetWorld?.stageKit) ? .04 : cycleProgress);
       if (phase.index !== this.lastPhase) {
         if (phase.index === 5) this.cutPulse = 1;
         if (phase.index === 6) this.clearFeedback();
@@ -1876,9 +1993,12 @@
       this.updateCamera(phase, quiet ? elapsed * .03 : elapsed);
       const visual = this.updateWorld(phase, quiet ? elapsed * .03 : elapsed, quiet ? dt * .03 : dt);
       // Distinct room silhouettes must not be obscured by the station's abstract rails/veils.
-      this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));
+      // The furnished stages carry the normal screen; the abstract rails / veils
+      // stay for CZ, bonus and boost (and as a fallback without the stage kit).
+      this.world.visible = !(this.presentation.kind === 'normal' && (this.cabinetWorld?.stageKit || ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage)));
       if (this.battleEnabled) visual.disorder *= .3;
       this.cabinetWorld?.update(dt, elapsed);
+      this.applyNormalShot(now);
       // Camera moves run after the world, which re-frames the camera per room.
       if (this.cutOffset) {
         // Hard cut in on the third stop, ease back out after the next lever.
@@ -1954,6 +2074,7 @@
 
     start() {
       if (this.running || this.disposed) return;
+      if (!this.warmedUp) { this.warmedUp = true; window.setTimeout(() => this.warmup(), 600); }
       this.running = true;
       this.previousAt = performance.now();
       this.rafId = requestAnimationFrame((time) => this.renderFrame(time));

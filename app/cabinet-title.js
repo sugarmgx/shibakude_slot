@@ -98,32 +98,63 @@
       else if(window.SlotBlackTypeface)installFont(window.SlotBlackTypeface);
       else fetch('./assets/fonts/line-seed-jp-extrabold.typeface.json?v=1').then(r=>{if(!r.ok)throw Error(r.status);return r.json();}).then(installFont).catch(error=>console.warn('立体文字を読み込めないため既存文字を維持します',error));
     }
+    // Extruded glyphs are cached per character (not per string), so counters
+    // and new words reuse geometry instead of re-extruding on the frame.
+    glyph(character) {
+      this.glyphs||=new Map();
+      if(this.glyphs.has(character))return this.glyphs.get(character);
+      const T=this.T,shapes=this.font.generateShapes(character,100);
+      let entry=null;
+      if(shapes.length){
+        // Keep every backing layer on the original outline. Wide positive bevels
+        // close counters and intersect adjacent strokes in this heavy CJK font.
+        // The tiny face bevel is inset, so it never expands into a glyph's holes.
+        const parts=[];
+        for(const [depth,bevel] of [[18,0],[9,0],[4,.3],[.8,.12]]) {
+          parts.push(new T.ExtrudeGeometry(shapes,{depth,bevelEnabled:bevel>0,bevelThickness:.2,bevelSize:bevel,bevelOffset:-bevel,bevelSegments:4,steps:1,curveSegments:12}));
+        }
+        parts[2].computeBoundingBox();const box=parts[2].boundingBox.clone(),center=box.getCenter(new T.Vector3());
+        parts.forEach(g=>g.translate(-center.x,-center.y,0));
+        entry={parts,box,center};
+      }
+      this.glyphs.set(character,entry);
+      return entry;
+    }
+    // Pre-extrude the glyphs every presentation uses and compile the title
+    // shaders once, so the first BIG / 発展 / result count never stalls.
+    warm(renderer) {
+      if(!this.font)return;
+      if(!this.heroGroup)this.buildHero();
+      for(const text of ['BIG BONUS','REG BONUS','GOLD REG BONUS','発展','WIN','0123456789 枚'])this.make(text);
+      const probe=new this.T.Group();
+      for(const letter of this.make('BIG BONUS').letters)letter.parts.forEach((g,i)=>probe.add(new this.T.Mesh(g,i>=2?[this.materials[2],this.materials[3]]:this.materials[i])));
+      for(const letter of this.make('0123456789 枚').letters)letter.parts.forEach((g,i)=>probe.add(new this.T.Mesh(g,i>=2?[this.payoutMaterials[2],this.payoutMaterials[3]]:this.payoutMaterials[i])));
+      this.scene.add(probe);
+      const heroVisible=this.heroGroup.visible,shadeVisible=this.heroShade.visible;
+      this.heroGroup.visible=this.heroShade.visible=true;
+      try{renderer.compile(this.scene,this.camera);}finally{
+        this.scene.remove(probe);
+        this.heroGroup.visible=heroVisible;this.heroShade.visible=shadeVisible;
+      }
+    }
     make(text) {
       if(this.cache.has(text))return this.cache.get(text);
-      const T=this.T,geometries=[],letters=[],bounds=new T.Box3();let advance=0;
-      // Keep every backing layer on the original outline. Wide positive bevels
-      // close counters and intersect adjacent strokes in this heavy CJK font.
-      // The tiny face bevel is inset, so it never expands into a glyph's holes.
+      const T=this.T,letters=[],bounds=new T.Box3();let advance=0;
       for(const character of text){
-        const shapes=this.font.generateShapes(character,100),parts=[];
-        if(shapes.length){
-          for(const [depth,bevel] of [[18,0],[9,0],[4,.3],[.8,.12]]) {
-            parts.push(new T.ExtrudeGeometry(shapes,{depth,bevelEnabled:bevel>0,bevelThickness:.2,bevelSize:bevel,bevelOffset:-bevel,bevelSegments:4,steps:1,curveSegments:12}));
-          }
-          parts[2].computeBoundingBox();const box=parts[2].boundingBox,center=box.getCenter(new T.Vector3());
-          bounds.union(box.clone().translate(new T.Vector3(advance,0,0)));
-          parts.forEach(g=>g.translate(-center.x,-center.y,0));
-          letters.push({parts,x:advance+center.x,y:center.y});geometries.push(...parts);
+        const entry=this.glyph(character);
+        if(entry){
+          bounds.union(entry.box.clone().translate(new T.Vector3(advance,0,0)));
+          letters.push({parts:entry.parts,x:advance+entry.center.x,y:entry.center.y});
         }
         advance+=this.font.data.glyphs[character].ha*100/this.font.data.resolution;
       }
       const center=bounds.getCenter(new T.Vector3()),size=bounds.getSize(new T.Vector3());
       letters.forEach(letter=>{letter.x-=center.x;letter.y-=center.y;});
-      const result={geometries,letters,size};this.cache.set(text,result);
+      // Geometry is owned by the glyph cache; string entries only hold layout.
+      const result={geometries:[],letters,size};this.cache.set(text,result);
       if(this.cache.size>8){
-        // Active title / payout meshes still reference their cached geometries.
         const key=[...this.cache.keys()].find(key=>key!==text&&key!==this.node?.textContent.trim()&&key!==this.payoutNode?.textContent.trim());
-        if(key!==undefined){this.cache.get(key).geometries.forEach(g=>g.dispose());this.cache.delete(key);}
+        if(key!==undefined)this.cache.delete(key);
       }
       return result;
     }
@@ -293,7 +324,7 @@
       this.sweep.position.x=reduced?150:Math.sin(Math.min(titleAge,1.2)/1.2*Math.PI-Math.PI/2)*240;
       const renderer=this.owner.renderer,auto=renderer.autoClear;renderer.autoClear=false;renderer.clearDepth();renderer.render(this.scene,this.camera);renderer.autoClear=auto;
     }
-    dispose(){this.heroGeometries?.forEach(g=>g.dispose());[this.heroFace,this.heroChrome,this.heroPlate,this.heroShade?.material].forEach(m=>m?.dispose());this.node?.classList.remove('has-3d-title');this.payoutNode?.classList.remove('has-3d-payout');this.cache.forEach(item=>item.geometries.forEach(g=>g.dispose()));this.materials.forEach(m=>m.dispose());this.payoutMaterials.forEach(m=>m.dispose());this.metalTexture?.dispose();}
+    dispose(){this.heroGeometries?.forEach(g=>g.dispose());this.glyphs?.forEach(entry=>entry?.parts.forEach(g=>g.dispose()));[this.heroFace,this.heroChrome,this.heroPlate,this.heroShade?.material].forEach(m=>m?.dispose());this.node?.classList.remove('has-3d-title');this.payoutNode?.classList.remove('has-3d-payout');this.cache.forEach(item=>item.geometries.forEach(g=>g.dispose()));this.materials.forEach(m=>m.dispose());this.payoutMaterials.forEach(m=>m.dispose());this.metalTexture?.dispose();}
   }
   window.CabinetTitle=CabinetTitle;
 })();

@@ -187,6 +187,9 @@
       const T = this.T, hdri = window.ShibakuStageHDRI, Loader = window.CabinetAssets?.EXRLoader;
       if (!hdri || !Loader) return;
       const pmrem = new T.PMREMGenerator(this.owner.renderer);
+      let pending = ["station", "hall", "lounge"].filter(stage => hdri[stage]).length;
+      // New environment maps change the shader variant: re-warm once all land.
+      const landed = () => { if (--pending === 0) window.setTimeout(() => this.owner.warmup?.(), 30); };
       for (const stage of ["station", "hall", "lounge"]) {
         if (!hdri[stage]) continue;
         new Loader().setDataType(T.HalfFloatType).load(hdri[stage], texture => {
@@ -195,7 +198,8 @@
           texture.dispose();
           this.owner.textures.push(env);
           for (const material of this.envTargets[stage]) { material.envMap = env; material.needsUpdate = true; }
-        }, undefined, () => console.warn("ステージ用HDRIを読めないため環境光なしで描画します"));
+          landed();
+        }, undefined, () => { console.warn("ステージ用HDRIを読めないため環境光なしで描画します"); landed(); });
       }
     }
 
