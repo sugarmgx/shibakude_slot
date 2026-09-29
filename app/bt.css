@@ -31,7 +31,7 @@
 .bt-cursor::after { bottom:-1px;border-bottom:7px solid #effbff; }
 .bt-result { display:none; }
 .bt-roulette.rolling .bt-track { animation:bt-roll var(--bt-speed,.3s) linear infinite; }
-.bt-roulette.settled .bt-track { animation:bt-drum-settle .55s cubic-bezier(.2,.9,.3,1); }
+.bt-roulette.settled:not(.rolling) .bt-track { animation:bt-drum-settle .55s cubic-bezier(.2,.9,.3,1); }
 .bt-roulette.settled .bt-cursor { animation:bt-hit .5s ease-out; }
 .bt-roulette.rolling .bt-choice { filter:blur(.35px); }
 @keyframes bt-roll { from {transform:translateZ(-63.66cqw) rotateY(var(--bt-angle))} to {transform:translateZ(-63.66cqw) rotateY(calc(var(--bt-angle) - 90deg))} }

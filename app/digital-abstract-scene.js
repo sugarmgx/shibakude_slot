@@ -1142,11 +1142,9 @@
         this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5;
         this.board.stops = (this.board.stops || 0) + 1;
         if (this.board.stops === 3 && !reduced) {
-          // Third stop: the picture holds for a beat, then hard-cuts to a new angle.
+          // Third stop: the picture holds for a beat; the camera work carries on
+          // from where it was (no re-framing).
           this.freezeUntil = now + 130;
-          const side = Math.random() < 0.5 ? -1 : 1;
-          this.cutTarget = new this.THREE.Vector3(side * (0.8 + Math.random() * 0.7), (Math.random() - 0.4) * 0.5, -0.6 - Math.random() * 0.8);
-          this.cutOffset = this.cutTarget.clone();
         }
       }
       this.atmosphere?.board(kind);

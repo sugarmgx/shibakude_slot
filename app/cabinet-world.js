@@ -41,6 +41,17 @@
       }
       this.createStructures(beam);
       this.createStationDetails(beam);
+      // Normal stages: a real island platform for the station and furnished
+      // rooms for the hall / lounge (see stage-kit.js). The abstract portal
+      // frames stay as a fallback when the kit or its textures are missing.
+      if (window.StageKit && window.ShibakuStageTextures) {
+        this.stageKit = new window.StageKit(this);
+        this.stationStage = this.stageKit.buildStation();
+        this.root.add(this.stationStage);
+        this.portals.forEach(portal => { portal.visible = false; });
+        this.stageKit.dressHall(this.structures.hall.group);
+        this.stageKit.dressLounge(this.structures.lounge.group);
+      }
       this.createCzLighting();
       this.createNormalCueFrame();
       this.enemy = new T.Group(); this.root.add(this.enemy);
@@ -494,6 +505,7 @@
         : stage === "クラブのラウンジ" ? "lounge" : stage === "同人音楽即売会" ? "hall" : null;
       if(structure!=="baba"){this.babaCueHits=0;this.babaCueAt=-Infinity;this.babaDolly=0;}
       this.corridor.visible = !structure;
+      if (this.stationStage) { this.stationStage.visible = !structure; this.stageKit.update(this.travel); }
       this.updateCzLighting(structure,time);
       for(const [name,profile] of Object.entries(this.structures)) {
         const boostBlueLayer=boost&&name==="blue";

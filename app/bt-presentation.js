@@ -39,6 +39,8 @@
       screen.classList.toggle("bt-announcement", !view.rolling && ["miss","end","retry"].includes(view.result));
       [...panel.querySelector(".bt-lamps").children].forEach((lamp,i)=>lamp.classList.toggle("lit",i<3-view.misses));
       panel.classList.toggle("rolling",Boolean(view.rolling));
+      // The landing animation must not outlive the landing: a new spin rolls.
+      if (view.rolling) panel.classList.remove("settled");
       panel.style.setProperty("--bt-speed",view.stops>=2?"0.85s":view.stops===1?"0.55s":"0.3s");
       const result=panel.querySelector(".bt-result");
       result.textContent="";

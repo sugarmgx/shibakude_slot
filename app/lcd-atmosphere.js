@@ -564,13 +564,15 @@
       const trainVisible = Boolean(run) && this.state.train > 0.3 && trainT >= -0.1 && trainT <= 1.1;
       this.train.visible = trainVisible;
       if (trainVisible) {
-        const side = Math.max(1, aspect / 1.8) * 5.8 * run.direction;
+        // Runs on the island platform's tracks (see stage-kit.js), car side facing the platform.
+        const side = 4.95 * run.direction;
         // Kept within the lit stretch of platform so the livery reads.
         const travel = run.direction > 0 ? -62 + trainT * 78 : 12 - trainT * 78;
         const depth = Math.max(0, -travel - 10);
         this.trainMaterial.opacity = Math.max(0, Math.min(1, 1.25 - depth / 45)) * Math.min(1, (1 - trainT) * 6, trainT * 6 + 0.2);
         this.train.rotation.y = -Math.PI / 2 * run.direction;
-        this.train.position.set(camera.position.x + side, -0.35, camera.position.z + travel);
+        this.train.scale.y = 3.3 / 2.6;
+        this.train.position.set(side, -1.55, camera.position.z + travel);
       }
       const crowd = this.state.crowd;
       this.crowdRows.forEach((mesh, row) => {
