@@ -402,11 +402,20 @@
       group.add(new T.AmbientLight(0xffc98a, 0.1));
     }
 
-    update(travel) {
-      if (this.station) {
-        this.station.position.z = ((travel % STATION_PERIOD) + STATION_PERIOD) % STATION_PERIOD;
-        this.rigs.station.uStageOffset.value.copy(this.station.position);
+    // The platform stands still while the camera shoots it. It only streams
+    // past during a rush (notice / 発展), then carries on to the next whole
+    // period so every prop is back exactly where the camera angles expect it.
+    update(dt = 0, boost = 1) {
+      if (!this.station) return;
+      this.stationTravel ||= 0;
+      const extra = Math.max(0, boost - 1);
+      if (extra > 0.01) this.stationTravel += dt * extra * 3;
+      else {
+        const target = Math.ceil(this.stationTravel / STATION_PERIOD - 1e-6) * STATION_PERIOD;
+        this.stationTravel = Math.min(target, this.stationTravel + dt * 6);
       }
+      this.station.position.z = this.stationTravel % STATION_PERIOD;
+      this.rigs.station.uStageOffset.value.copy(this.station.position);
     }
   }
 

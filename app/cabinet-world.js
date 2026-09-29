@@ -505,7 +505,7 @@
         : stage === "クラブのラウンジ" ? "lounge" : stage === "同人音楽即売会" ? "hall" : null;
       if(structure!=="baba"){this.babaCueHits=0;this.babaCueAt=-Infinity;this.babaDolly=0;}
       this.corridor.visible = !structure;
-      if (this.stationStage) { this.stationStage.visible = !structure; this.stageKit.update(this.travel); }
+      if (this.stationStage) { this.stationStage.visible = !structure; this.stageKit.update(dt, o.speedBoost || 1); }
       this.updateCzLighting(structure,time);
       for(const [name,profile] of Object.entries(this.structures)) {
         const boostBlueLayer=boost&&name==="blue";
