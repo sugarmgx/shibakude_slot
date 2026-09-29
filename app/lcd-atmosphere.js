@@ -61,11 +61,11 @@
   // each reads at a glance; bonus / boost keep the tunnel travel direction.
   const PROFILES = {
     station: { fog: 0.5, fogColor: 0x6b8aa0, beams: 0.5, beamColor: 0xd6ecff, beamSwing: 0.04, beamSlant: 0.16, train: 1, flicker: 1,
-      flowA: 0xbfd8ea, flowB: 0x5d84a8, flow: 0.5, speed: 1.3, swirl: 0, bokeh: 0.5, bokehColor: 0xbfe0ff, contrast: 0.2, tint: [0.97, 1.0, 1.04] },
+      flowA: 0xbfd8ea, flowB: 0x5d84a8, flow: 0.25, speed: 1.3, swirl: 0, bokeh: 0.5, bokehColor: 0xbfe0ff, contrast: 0.2, tint: [0.97, 1.0, 1.04] },
     hall: { fog: 0.7, fogColor: 0x8a5fa8, beams: 1.0, beamColor: 0xff86d8, beamSwing: 0.32, beamSlant: 0.0, train: 0, flicker: 0,
-      flowA: 0xff9ad8, flowB: 0x72d4ff, flow: 0.55, speed: 0.8, swirl: 0, bokeh: 0.7, bokehColor: 0xffb3e6, contrast: 0.16, tint: [1.02, 0.98, 1.04] },
+      flowA: 0xff9ad8, flowB: 0x72d4ff, flow: 0.28, speed: 0.8, swirl: 0, bokeh: 0.7, bokehColor: 0xffb3e6, contrast: 0.16, tint: [1.02, 0.98, 1.04] },
     lounge: { fog: 0.5, fogColor: 0x9a6c3e, beams: 0.6, beamColor: 0xffc98a, beamSwing: 0.03, beamSlant: 0.06, train: 0, flicker: 0,
-      flowA: 0xffd59c, flowB: 0xa7703e, flow: 0.4, speed: 0.45, swirl: 0, bokeh: 0.95, bokehColor: 0xffc47a, contrast: 0.14, tint: [1.06, 1.0, 0.92] },
+      flowA: 0xffd59c, flowB: 0xa7703e, flow: 0.2, speed: 0.45, swirl: 0, bokeh: 0.95, bokehColor: 0xffc47a, contrast: 0.14, tint: [1.06, 1.0, 0.92] },
     challenge: { fog: 0.5, fogColor: null, beams: 0.3, beamColor: null, beamSwing: 0.08, beamSlant: 0.1, train: 0, flicker: 0,
       flowA: null, flowB: null, flow: 0.55, speed: 1.8, swirl: 0.15, bokeh: 0.45, bokehColor: null, contrast: 0.14, tint: [1, 1, 1] },
     bonus: { fog: 0.3, fogColor: null, beams: 0.18, beamColor: null, beamSwing: 0.1, beamSlant: 0, train: 0, flicker: 0,
