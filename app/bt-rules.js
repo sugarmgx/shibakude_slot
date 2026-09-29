@@ -22,7 +22,6 @@
   const czDenominators = Object.freeze([0,78,75.37254777346,71.66740952765,65.00242064111,59.17504139355,54.03670737093]);
   const normalWeights = Object.freeze({miss:782,replay:160,bell:60,watermelon:15,cherry:15,strongCherry:6,watermelonChance:3,chance:2});
   const entryFactors = Object.freeze({miss:.5,replay:1.4,bell:2,watermelon:10,cherry:10,strongCherry:30,watermelonChance:30,chance:30});
-  const entryMean = Object.entries(normalWeights).reduce((n,[k,w])=>n+w*entryFactors[k],0)/1043;
   const tables = Object.freeze({
     standard:Object.freeze({RED_BIG:.08273159753890003,BLUE_BIG:.03545639894524286,REG:.10189840708480592,retry:.1,miss:.6799135964310512}),
     blue:Object.freeze({RED_BIG:.09911620079720601,BLUE_BIG:.055752862948428364,REG:.06521733982331444,retry:.1,miss:.6799135964310512})
@@ -33,9 +32,16 @@
     for(const [key,weight] of entries) { cursor-=weight; if(cursor<0) return key; }
     return entries[entries.length-1][0];
   }
+  // Fixed CZ entry: strong cherry always, weak cherry 20%.
+  const fixedEntry = Object.freeze({cherry:.2, strongCherry:1});
+  const fixedMass = Object.entries(fixedEntry).reduce((n,[k,r])=>n+normalWeights[k]/1043*r,0);
+  const restMass = Object.entries(normalWeights).filter(([k])=>!(k in fixedEntry)).reduce((n,[k,w])=>n+w/1043*entryFactors[k],0);
   function entryRate(setting, role) {
-    // Conditional on neither middle cherry nor direct bonus: aggregate CZ rate stays 1/N.
-    return (entryFactors[role]||0)/entryMean/czDenominators[setting]/((1-1/16384)*(1-1/2000));
+    if (role in fixedEntry) return fixedEntry[role];
+    // Conditional on neither middle cherry nor direct bonus: aggregate CZ rate stays 1/N;
+    // the other roles share what the fixed cherry rates leave.
+    const target = 1/czDenominators[setting]/((1-1/16384)*(1-1/2000));
+    return (entryFactors[role]||0)*(target-fixedMass)/restMass;
   }
   function promote(type, streak) { return type==="REG" && streak>=2 ? "GOLD_REG" : type; }
   function nextStreak(type, streak) { return type==="REG" ? streak+1 : 0; }
