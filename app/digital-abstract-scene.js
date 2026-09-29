@@ -1029,6 +1029,8 @@
         flash: clamp(options.flash ?? 1, 0, 1.5),
         released: false,
       };
+      // DOM lettering sits above the canvas; let it sink with the hold too.
+      if (hold > 0) this.host.closest(".lcd-screen")?.setAttribute("data-impact-hold", "");
     }
 
     updateImpact(now) {
@@ -1047,6 +1049,7 @@
         } else {
           if (!fx.released) {
             fx.released = true;
+            this.host.closest(".lcd-screen")?.removeAttribute("data-impact-hold");
             this.pulse(2.2 * fx.strength);
           }
           age = (now - fx.releaseAt) / 1000;

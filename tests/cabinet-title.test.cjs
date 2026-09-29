@@ -51,3 +51,35 @@ test('HDR rotation is injected into the expanded physical shader chunk',()=>{
   assert.ok(shader.fragmentShader.includes('reflectVec.xz = mat2('));
   assert.equal(shader.uniforms.uTitleEnvRotation,view.envRotationUniform);
 });
+test('reel-7 cut-in slams in after the hold, settles in front of the camera and leaves before the title',()=>{
+  const {view}=fixture(),host={width:1706,height:356},distance=564;
+  const machineClasses=new Set(['bonus-confirmed','bonus-confirm-red']);
+  nodes['.machine-window']={classList:{contains:x=>machineClasses.has(x)}};
+  const start=10000;
+  assert.equal(view.renderHero(start,1706,356,host,distance,false),true);
+  assert.equal(view.heroGroup.visible,false);
+  for(const ms of [80,150,270,400,550,700]){
+    view.renderHero(start+ms,1706,356,host,distance,false);
+    assert.equal(view.heroGroup.visible,true,`visible at ${ms}ms`);
+    assert.ok(view.heroGroup.position.z<distance,`in front of the camera at ${ms}ms`);
+    assert.ok([...view.heroGroup.position,...view.heroGroup.quaternion,view.heroGroup.scale.x].every(Number.isFinite));
+    assert.ok(view.heroShade.material.opacity>=0&&view.heroShade.material.opacity<=1);
+  }
+  assert.ok(view.heroFace.color.r>view.heroFace.color.b);
+  view.renderHero(start+800,1706,356,host,distance,false);
+  assert.equal(view.heroGroup.visible,false);
+  assert.equal(view.heroShade.visible,false);
+  machineClasses.clear();
+  view.renderHero(start+1300,1706,356,host,distance,false);
+  assert.equal(view.heroStarted,0);
+  machineClasses.add('bonus-confirmed');machineClasses.add('bonus-confirm-blue');
+  view.renderHero(start+2000,1706,356,host,distance,false);
+  view.renderHero(start+2200,1706,356,host,distance,false);
+  assert.ok(view.heroFace.color.b>view.heroFace.color.r);
+});
+test('REG confirmation never shows the reel-7 cut-in',()=>{
+  const {view}=fixture();
+  nodes['.machine-window']={classList:{contains:x=>['bonus-confirmed','bonus-confirm-reg'].includes(x)}};
+  for(const ms of [0,150,400])assert.equal(view.renderHero(5000+ms,1706,356,{width:1706,height:356},564,false),false);
+  assert.ok(!view.heroGroup||!view.heroGroup.visible);
+});
