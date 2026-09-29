@@ -32,7 +32,7 @@
     // Top lamp: the machine's lit logo sign.
     const marquee = machine.querySelector(".cabinet-marquee");
     if (marquee) {
-      marquee.innerHTML = '<div class="toplamp" role="img" aria-label="しばくでスロット BT"><span class="toplamp-word">しばくでスロット</span><span class="toplamp-badge">BT</span></div>';
+      marquee.innerHTML = '<div class="toplamp" role="img" aria-label="しばくでスロット"><span class="toplamp-word">しばくでスロット</span></div>';
     }
 
     // Side lamps: light pipes that carry the colour the LCD is emitting.
@@ -77,7 +77,7 @@
     const waist = document.createElement("section");
     waist.className = "cabinet-waist";
     waist.innerHTML = `
-      <div class="waist-art" aria-hidden="true"><span class="waist-word">しばくでスロット</span><span class="waist-mark">BT</span></div>
+      <div class="waist-art" aria-hidden="true"><span class="waist-word">しばくでスロット</span></div>
       <div class="pay-table" role="table" aria-label="配当表">
         ${PAY_TABLE.map(([symbols, pay]) => `<div class="pay-row" role="row"><span class="pay-symbols" role="cell">${symbols.map(name => `<img src="${SYMBOL(name)}" alt="">`).join("")}</span><span class="pay-value" role="cell">${/^\d+$/.test(pay) ? `${pay}<small>枚</small>` : pay}</span></div>`).join("")}
         <p class="pay-note">3枚掛け</p>

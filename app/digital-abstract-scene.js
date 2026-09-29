@@ -1043,7 +1043,7 @@
               float below = horizon - vUv.y;
               if (below > 0.0) {
                 vec2 mirror = vec2(warped.x + sin(vUv.y * 140.0 + uTime * 2.0) * 0.0015, horizon + below * 1.2);
-                color += sampleScene(mirror) * (1.0 - smoothstep(0.0, horizon, below)) * 0.2 * uFloor;
+                color += sampleScene(mirror) * (1.0 - smoothstep(0.0, horizon, below)) * 0.12 * uFloor;
               }
             }
             if (uRays > 0.001) {
@@ -1087,13 +1087,21 @@
                 prevUv = cellCentre + (vUv - cellCentre) * (1.0 + t * 0.35) + vec2((hash12(cell + 7.0) - 0.5) * t * 0.08, -t * t * 0.28);
                 vec2 inCell = abs(fract(vUv * grid) - 0.5);
                 edge = (1.0 - smoothstep(0.44, 0.5, max(inCell.x, inCell.y))) < 0.5 ? (1.0 - p) * 0.8 : 0.0;
-              } else {
+              } else if (uWipeType < 2.5) {
                 float line = vUv.x + (vUv.y - 0.5) * 0.35;
                 float front = p * 1.5 - 0.25;
                 reveal = step(line, front);
                 edge = 1.0 - smoothstep(0.0, 0.025, abs(line - front));
+              } else {
+                // Travel: fly into the old stage until it streams past, then arrive.
+                vec2 fromCentre = vUv - 0.5;
+                prevUv = 0.5 + fromCentre / (1.0 + p * p * 3.0);
+                reveal = smoothstep(0.35, 0.8, p);
+                float angleId = floor(atan(fromCentre.y, fromCentre.x * 1.8) * 40.0);
+                edge = step(0.82, hash12(vec2(angleId, 5.0))) * smoothstep(0.12, 0.6, length(fromCentre * vec2(1.8, 1.0))) * sin(3.14159 * p) * 0.5;
               }
               vec3 previous = texture2D(uPrev, clamp(prevUv, vec2(0.0005), vec2(0.9995))).rgb;
+              if (uWipeType > 2.5) previous *= 1.0 + p * 1.2;
               color = mix(previous, color, reveal) + vec3(1.0, 0.95, 0.88) * edge * 0.6;
             }
             gl_FragColor = vec4(shoulder(color), 1.0);
@@ -1144,6 +1152,99 @@
       this.atmosphere?.board(kind);
     }
 
+    // Notice at lever-on. At the station it is a train (grade = look);
+    // elsewhere the camera dashes forward down the stage and back.
+    notice(grade = "normal", direction = 1) {
+      const stage = this.scenery?.stage;
+      const station = this.presentation.kind === "normal" && stage !== "同人音楽即売会" && stage !== "クラブのラウンジ";
+      if (station && this.atmosphere) this.atmosphere.runTrain(grade, direction);
+      else this.rush({ duration: grade === "normal" ? 0.8 : 1.0, strength: grade === "normal" ? 0.55 : grade === "express" ? 0.85 : 1.05, returns: true });
+      if (grade === "gold") {
+        window.setTimeout(() => this.impact({ strength: 0.6, hold: 0, color: 0xffc247, rays: 0.8, flash: 0.35, disturb: false }), station ? 620 : 420);
+      }
+    }
+
+    rush({ duration = 0.8, strength = 1, returns = true } = {}) {
+      this.rushFx = { at: performance.now(), duration, strength, returns };
+    }
+
+    develop({ rushMs = 650 } = {}) {
+      this.rush({ duration: rushMs / 1000 + 0.85, strength: 1.25, returns: false });
+      this.nextWipeType = 1;
+      // Black hold while "発展" flies in; the release lands with the title.
+      window.setTimeout(() => this.impact({ strength: 0.45, hold: 0.3, color: 0xffb43b, rays: 0.2, flash: 0.35 }), rushMs);
+    }
+
+    // 50G stage change: travel through the old stage into the new one.
+    stageTravel() {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+      this.captureTransition(3);
+      this.arriveFx = { at: performance.now() };
+    }
+
+    // BIG progress (coins / limit, already on screen): an orbit at the
+    // halfway mark and a faster tunnel over the final stretch.
+    bonusProgress(ratio = 0) {
+      const previous = this.lastBonusRatio ?? 0;
+      if (ratio < previous - 0.05) this.halfwayDone = false;
+      if (!this.halfwayDone && previous < 0.5 && ratio >= 0.5 && ratio < 1) {
+        this.halfwayDone = true;
+        this.orbitFx = { at: performance.now() };
+        this.impact({ strength: 0.5, hold: 0, color: this.theme.primary.getHex(), rays: 0.7, flash: 0.3 });
+      }
+      this.finalStretch = ratio >= 0.85 && ratio < 1;
+      this.lastBonusRatio = ratio;
+    }
+
+    // Bonus result: the camera pulls back out of the tunnel while counting.
+    resultPullout(durationMs = 4000) {
+      this.pulloutFx = { at: performance.now(), duration: Math.min(4, durationMs / 1000) };
+    }
+
+    applyCameraMoves(now, dt) {
+      const camera = this.camera;
+      let fov = 0, rushAmount = 0;
+      const rush = this.rushFx;
+      if (rush) {
+        const t = (now - rush.at) / 1000 / rush.duration;
+        if (t >= 1) this.rushFx = null;
+        else {
+          const envelope = rush.returns ? Math.sin(Math.PI * Math.min(1, t)) : Math.min(1, t * 2.2);
+          rushAmount = envelope * rush.strength;
+          // A returning dash nudges forward and back; a develop rush keeps
+          // accelerating down the stage until the cut.
+          camera.position.z -= rush.returns ? rushAmount * 4.5 : rush.strength * 22 * t * t;
+          fov += rushAmount * 24;
+        }
+      }
+      const arrive = this.arriveFx;
+      if (arrive) {
+        const t = (now - arrive.at) / 900;
+        if (t >= 1) this.arriveFx = null;
+        else { const k = (1 - t) ** 2; camera.position.z += k * 7; fov += k * 18; rushAmount = Math.max(rushAmount, k * 0.9); }
+      }
+      const orbit = this.orbitFx;
+      if (orbit) {
+        const t = (now - orbit.at) / 1700;
+        if (t >= 1) this.orbitFx = null;
+        else {
+          const angle = smooth(t) * Math.PI * 2, reach = Math.sin(Math.PI * t);
+          camera.position.x += Math.sin(angle) * 3.2 * reach;
+          camera.position.y += (1 - Math.cos(angle)) * 0.5 * reach;
+          camera.lookAt(0.4, -0.2, -16);
+        }
+      }
+      const pullout = this.pulloutFx;
+      if (pullout) {
+        const t = (now - pullout.at) / 1000 / pullout.duration;
+        if (t >= 1.2) this.pulloutFx = null;
+        else { const k = smooth(clamp(t, 0, 1)); camera.position.z += k * 9; fov -= k * 8; }
+      }
+      this.rushAmount = rushAmount;
+      this.speedBoost = 1 + rushAmount * 6 + (this.finalStretch && this.presentation.kind === "bonus" ? 0.7 : 0);
+      if (fov) { camera.fov = clamp(camera.fov + fov, 20, 110); camera.updateProjectionMatrix(); }
+    }
+
     // Starts a hold → release beat. `hold` seconds of darkening and a slow
     // push-in precede the hit; the hit itself whites out, rings and settles.
     impact(options = {}) {
@@ -1160,6 +1261,7 @@
         color: new THREE.Color(options.color ?? 0xffffff),
         rays: clamp(Number(options.rays) || 0, 0, 1.5),
         flash: clamp(options.flash ?? 1, 0, 1.5),
+        disturb: options.disturb ?? true,
         released: false,
       };
       // DOM lettering sits above the canvas; let it sink with the hold too.
@@ -1183,7 +1285,7 @@
           if (!fx.released) {
             fx.released = true;
             this.host.closest(".lcd-screen")?.removeAttribute("data-impact-hold");
-            this.pulse(2.2 * fx.strength);
+            if (fx.disturb) this.pulse(2.2 * fx.strength);
           }
           age = (now - fx.releaseAt) / 1000;
           strength = fx.strength;
@@ -1210,10 +1312,10 @@
       uniforms.uPulse.value = kick * 0.05;
       uniforms.uTime.value = now / 1000;
       uniforms.uAnamorphic.value = 0.22 * weights.normal + 0.26 * weights.challenge + 0.24 * weights.bonus + 0.3 * weights.boost
-        + (fx && fx.released ? fx.strength * 0.5 * Math.exp(-age * 2.5) : 0) + kick * 0.12;
+        + (fx && fx.released ? fx.strength * 0.5 * Math.exp(-age * 2.5) : 0) + kick * 0.12 + (this.rushAmount || 0) * 0.35;
       uniforms.uFloor.value = weights.bonus;
       const wipeAge = this.wipe ? (now - this.wipe.at) / 1000 : 99;
-      uniforms.uWipe.value = reduced ? 1 : clamp(wipeAge / 0.55, 0, 1);
+      uniforms.uWipe.value = reduced ? 1 : clamp(wipeAge / (this.wipe?.type === 3 ? 0.8 : 0.55), 0, 1);
       if (this.wipe) uniforms.uWipeType.value = this.wipe.type;
       const display = this.displayMaterial.uniforms;
       display.uDof.value = reduced ? 0 : 0.45 * weights.normal + 0.6 * weights.challenge + 0.75 * weights.bonus + 0.5 * weights.boost;
@@ -1401,7 +1503,8 @@
       const nextKind = PRESENTATION_KEYS.includes(kind) ? kind : "normal";
       const changed = this.presentation.kind !== nextKind || this.presentation.variant !== variant;
       if (this.presentation.kind !== nextKind && !options.immediate) {
-        this.captureTransition(nextKind === "challenge" ? 0 : nextKind === "bonus" ? 1 : 2);
+        this.captureTransition(this.nextWipeType ?? (nextKind === "challenge" ? 0 : nextKind === "bonus" ? 1 : 2));
+        this.nextWipeType = null;
       }
       this.presentation = { kind: nextKind, variant: Number(variant) || 0 };
       PRESENTATION_KEYS.forEach((key) => {
@@ -1771,17 +1874,19 @@
       const dynamics = this.options.getDynamics?.();
       if (dynamics) this.setEnergy(dynamics.intensity, dynamics.burst);
       this.updateCamera(phase, quiet ? elapsed * .03 : elapsed);
+      const visual = this.updateWorld(phase, quiet ? elapsed * .03 : elapsed, quiet ? dt * .03 : dt);
+      // Distinct room silhouettes must not be obscured by the station's abstract rails/veils.
+      this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));
+      if (this.battleEnabled) visual.disorder *= .3;
+      this.cabinetWorld?.update(dt, elapsed);
+      // Camera moves run after the world, which re-frames the camera per room.
       if (this.cutOffset) {
         // Hard cut in on the third stop, ease back out after the next lever.
         if (!this.cutTarget) this.cutOffset.multiplyScalar(Math.exp(-dt * 3));
         this.camera.position.add(this.cutOffset);
         if (this.cutOffset.lengthSq() < 0.0004 && !this.cutTarget) this.cutOffset = null;
       }
-      const visual = this.updateWorld(phase, quiet ? elapsed * .03 : elapsed, quiet ? dt * .03 : dt);
-      // Distinct room silhouettes must not be obscured by the station's abstract rails/veils.
-      this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));
-      if (this.battleEnabled) visual.disorder *= .3;
-      this.cabinetWorld?.update(dt, elapsed);
+      this.applyCameraMoves(now, dt);
       const musicKick = this.music.kick * this.music.active;
       if (musicKick > 0.01 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         this.camera.fov -= musicKick * 1.3;

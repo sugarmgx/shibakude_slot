@@ -18,8 +18,11 @@
         panel.className = "bt-roulette";
         panel.innerHTML = '<div class="bt-lamps" aria-label="残りランプ"><i></i><i></i><i></i></div><div class="bt-window"><div class="bt-track"></div><span class="bt-cursor"></span></div><strong class="bt-result"></strong>';
         const track = panel.querySelector(".bt-track");
+        // Twenty faces around a vertical drum (18 degrees apart).
+        let face = 0;
         for (let repeat=0; repeat<4; repeat++) for (const [key,label] of choices) {
           const cell=document.createElement("span"); cell.className="bt-choice bt-"+key;
+          cell.style.setProperty("--bt-face", String(face++));
           if (key==="RED_BIG" || key==="BLUE_BIG") {
             const img=document.createElement("img");
             img.src="./assets/symbols/"+(key==="RED_BIG"?"red7":"blue7")+".png";
@@ -42,8 +45,8 @@
       const key=[state.bt?.games,view.result,view.rolling].join(":");
       if (lastKey!==key && !view.rolling) {
         const idx=Math.max(0,choices.findIndex(([v])=>v===(view.result==="end"||!view.result?"miss":view.result)));
-        // Five cells per full cycle, selected tile fixed under the center cursor.
-        panel.querySelector(".bt-track").style.transform="translateX(calc(50% - "+(idx*20+10)+"cqw))";
+        // Turn the drum so the selected face sits under the centre cursor.
+        panel.querySelector(".bt-track").style.setProperty("--bt-angle", (-idx*18)+"deg");
         panel.classList.remove("settled");void panel.offsetWidth;panel.classList.add("settled");
       }
       lastKey=key;

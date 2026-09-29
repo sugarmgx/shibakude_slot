@@ -93,8 +93,6 @@
       this.spark = 0;
       this.flickerValue = 1;
       this.flickerUntil = 0;
-      this.nextTrainAt = 4;
-      this.trainStart = -99;
       this.createFlow();
       this.createHaze();
       this.createBokeh();
@@ -185,7 +183,7 @@
         uniforms: {
           uTime: { value: 0 }, uHalf: { value: new T.Vector2(1, 1) }, uDepth: { value: 16 }, uAspect: { value: 4 },
           uFog: { value: 0 }, uFogColor: { value: new T.Color() }, uBeams: { value: 0 }, uBeamColor: { value: new T.Color() },
-          uSwing: { value: 0 }, uSlant: { value: 0 }, uTrain: { value: 0 }, uTrainPos: { value: -9 }, uFlicker: { value: 1 },
+          uSwing: { value: 0 }, uSlant: { value: 0 }, uTrain: { value: 0 }, uTrainPos: { value: -9 }, uTrainColor: { value: new T.Color(0xd9f2ff) }, uFlicker: { value: 1 },
           uKick: { value: 0 }, uLevel: { value: 0 }, uSpark: { value: 0 }, uBall: { value: 0 }, uBallColor: { value: new T.Color(0xffe2b8) },
         },
         vertexShader: `
@@ -210,6 +208,7 @@
           uniform float uSlant;
           uniform float uTrain;
           uniform float uTrainPos;
+          uniform vec3 uTrainColor;
           uniform float uFlicker;
           uniform float uKick;
           uniform float uLevel;
@@ -247,7 +246,7 @@
             color += uBeamColor * beams * uBeams * 0.55;
             float trainCore = exp(-pow((p.x - uTrainPos) / 0.45, 2.0)) * exp(-pow((vUv.y - 0.36) / 0.07, 2.0));
             float trainWash = exp(-pow((p.x - uTrainPos) / 1.4, 2.0)) * 0.12;
-            color += vec3(0.85, 0.95, 1.0) * (trainCore * 0.9 + trainWash) * uTrain;
+            color += uTrainColor * (trainCore * 0.9 + trainWash) * uTrain;
             if (uBall > 0.01) {
               // Mirror-ball flecks sweeping the room, denser toward the floor.
               float spin = uTime * 0.12;
@@ -342,37 +341,60 @@
     }
 
     // Station set piece: a lit commuter train rushing past behind the pillars.
+    // Station set piece: a lit train rushing past behind the pillars. Three
+    // liveries (commuter / express / gold) are the notice grades.
     createTrain() {
       const T = this.T, owner = this.owner;
-      let seed = 3;
-      const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-      const texture = LcdAtmosphere.canvasTexture(T, 2048, 128, (ctx, w, h) => {
-        ctx.fillStyle = "#0b0f14"; ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = "#26313a"; ctx.fillRect(0, 12, w, 4); ctx.fillRect(0, h - 22, w, 3);
-        for (let car = 0; car < 4; car += 1) {
-          const x0 = car * 512;
-          ctx.fillStyle = "#000"; ctx.fillRect(x0, 0, 6, h);
-          for (let win = 0; win < 7; win += 1) {
-            const x = x0 + 26 + win * 68;
-            const glow = ctx.createLinearGradient(0, 30, 0, 86);
-            glow.addColorStop(0, "#fff8e6"); glow.addColorStop(1, "#d8e6f0");
-            ctx.fillStyle = glow; ctx.fillRect(x, 30, 48, 56);
-            ctx.fillStyle = "rgba(10,14,18,0.8)";
-            for (let k = 0; k < 2; k += 1) if (rand() < 0.55) {
-              const px = x + 8 + rand() * 30;
-              ctx.beginPath(); ctx.arc(px, 58, 7, 0, 7); ctx.fill(); ctx.fillRect(px - 10, 64, 20, 22);
+      const livery = (kind) => {
+        let seed = 3;
+        const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+        const body = kind === "gold" ? "#3a2606" : "#0b0f14";
+        const windowTop = kind === "gold" ? "#fff2c4" : "#fff8e6";
+        const windowBottom = kind === "gold" ? "#ffc247" : "#d8e6f0";
+        const texture = LcdAtmosphere.canvasTexture(T, 2048, 128, (ctx, w, h) => {
+          ctx.fillStyle = body; ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = kind === "gold" ? "#ffd166" : "#26313a"; ctx.fillRect(0, 12, w, 4); ctx.fillRect(0, h - 22, w, 3);
+          if (kind === "express") { ctx.fillStyle = "#e0231b"; ctx.fillRect(0, 94, w, 10); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 106, w, 3); }
+          if (kind === "gold") { const band = ctx.createLinearGradient(0, 0, w, 0); band.addColorStop(0, "#fff3c4"); band.addColorStop(0.5, "#ffb43b"); band.addColorStop(1, "#fff3c4"); ctx.fillStyle = band; ctx.fillRect(0, 94, w, 12); }
+          for (let car = 0; car < 4; car += 1) {
+            const x0 = car * 512;
+            ctx.fillStyle = "#000"; ctx.fillRect(x0, 0, 6, h);
+            for (let win = 0; win < 7; win += 1) {
+              const x = x0 + 26 + win * 68;
+              const glow = ctx.createLinearGradient(0, 30, 0, 86);
+              glow.addColorStop(0, windowTop); glow.addColorStop(1, windowBottom);
+              ctx.fillStyle = glow; ctx.fillRect(x, 30, 48, 56);
+              ctx.fillStyle = "rgba(10,14,18,0.8)";
+              for (let k = 0; k < 2; k += 1) if (rand() < 0.55) {
+                const px = x + 8 + rand() * 30;
+                ctx.beginPath(); ctx.arc(px, 58, 7, 0, 7); ctx.fill(); ctx.fillRect(px - 10, 64, 20, 22);
+              }
             }
           }
-        }
-      });
-      texture.wrapS = T.RepeatWrapping;
-      texture.repeat.set(2, 1);
-      const material = owner.trackMaterial(new T.MeshBasicMaterial({ map: texture, color: 0xc8d4dc, fog: true }));
-      owner.textures.push(texture);
-      this.train = new T.Mesh(owner.track(new T.PlaneGeometry(60, 2.6)), material);
-      this.train.rotation.y = -Math.PI / 2;
+        });
+        texture.wrapS = T.RepeatWrapping;
+        texture.repeat.set(kind === "express" ? 3 : 2, 1);
+        owner.textures.push(texture);
+        return texture;
+      };
+      this.trainLiveries = { normal: livery("normal"), express: livery("express"), gold: livery("gold") };
+      this.trainMaterial = owner.trackMaterial(new T.MeshBasicMaterial({ map: this.trainLiveries.normal, color: 0xc8d4dc, fog: false, transparent: true }));
+      this.train = new T.Mesh(owner.track(new T.PlaneGeometry(60, 2.6)), this.trainMaterial);
       this.train.visible = false;
       this.group.add(this.train);
+      this.trainRun = null;
+      this.clock = 0;
+    }
+
+    // Right side runs far -> near, left side runs near -> far.
+    runTrain(grade = "normal", direction = 1) {
+      const duration = grade === "express" ? 0.85 : grade === "gold" ? 1.15 : 1.4;
+      this.trainRun = { start: this.clock + 0.2, duration, grade, direction };
+      this.trainMaterial.map = this.trainLiveries[grade] || this.trainLiveries.normal;
+      this.trainMaterial.color.set(grade === "normal" ? 0xc8d4dc : 0xffffff);
+      this.trainMaterial.needsUpdate = true;
+      this.train.scale.x = grade === "express" ? 1.5 : 1;
+      if (grade === "gold") this.spark = 1;
     }
 
     // Hall set piece: two rows of audience silhouettes along the bottom edge.
@@ -487,16 +509,20 @@
       const kick = music.kick * music.active, level = music.level * music.active;
       this.surge = Math.max(0, this.surge - dt * 1.6);
       this.spark = Math.max(0, this.spark - dt * 1.8);
-      this.travel += dt * (this.state.speed * (1 + kick * 0.6 + level * 0.3) + this.surge * 9);
+      this.travel += dt * (this.state.speed * (1 + kick * 0.6 + level * 0.3) + this.surge * 9 + (owner.rushAmount || 0) * 42);
 
       // Fluorescent flicker and the passing train belong to the station only.
       if (this.state.flicker > 0.05 && time > this.flickerUntil && Math.random() < dt * 0.18) this.flickerUntil = time + 0.05 + Math.random() * 0.12;
       const dip = time < this.flickerUntil ? (Math.sin(time * 90) > 0 ? 0.45 : 0.8) : 1;
       this.flickerValue = 1 + (dip - 1) * this.state.flicker;
-      if (time > this.nextTrainAt) { this.trainStart = time; this.nextTrainAt = time + 9 + Math.random() * 6; }
-      const trainT = (time - this.trainStart) / 1.4;
+      this.clock = time;
+      const run = this.trainRun;
+      const trainT = run ? (time - run.start) / run.duration : -9;
+      if (run && trainT > 1.2) this.trainRun = null;
       const aspect = camera.aspect;
-      const trainPos = trainT >= 0 && trainT <= 1 ? (-0.75 + trainT * 1.5) * aspect : -99;
+      const trainPos = trainT >= 0 && trainT <= 1
+        ? (run.direction > 0 ? trainT * 0.8 : -0.8 + trainT * 0.8) * aspect
+        : -99;
 
       const ratio = owner.renderer.getPixelRatio();
       const flow = this.flowMaterial.uniforms;
@@ -526,6 +552,7 @@
       haze.uSlant.value = this.state.beamSlant;
       haze.uTrain.value = this.state.train;
       haze.uTrainPos.value = trainPos;
+      haze.uTrainColor.value.set(run?.grade === "gold" ? 0xffc247 : run?.grade === "express" ? 0xffd9d0 : 0xd9f2ff);
       haze.uFlicker.value = this.flickerValue;
       haze.uKick.value = kick;
       haze.uLevel.value = level;
@@ -534,11 +561,16 @@
       haze.uBall.value = this.state.ball;
 
       // Train: runs with the passing-light sweep, deep behind the station pillars.
-      const trainVisible = this.state.train > 0.3 && trainT >= -0.1 && trainT <= 1.1;
+      const trainVisible = Boolean(run) && this.state.train > 0.3 && trainT >= -0.1 && trainT <= 1.1;
       this.train.visible = trainVisible;
       if (trainVisible) {
-        const side = Math.max(1, aspect / 1.8) * 5.8;
-        this.train.position.set(camera.position.x + side, -0.35, camera.position.z - 95 + trainT * 120);
+        const side = Math.max(1, aspect / 1.8) * 5.8 * run.direction;
+        // Kept within the lit stretch of platform so the livery reads.
+        const travel = run.direction > 0 ? -62 + trainT * 78 : 12 - trainT * 78;
+        const depth = Math.max(0, -travel - 10);
+        this.trainMaterial.opacity = Math.max(0, Math.min(1, 1.25 - depth / 45)) * Math.min(1, (1 - trainT) * 6, trainT * 6 + 0.2);
+        this.train.rotation.y = -Math.PI / 2 * run.direction;
+        this.train.position.set(camera.position.x + side, -0.35, camera.position.z + travel);
       }
       const crowd = this.state.crowd;
       this.crowdRows.forEach((mesh, row) => {

@@ -321,6 +321,7 @@
       const showingNormalStage=state.mode==="normal"&&copy.title===(state.stage||"通常ステージ");
       if(showingNormalStage){
         if(api.lastNormalStage&&api.lastNormalStage!==copy.title&&!reducedMotion.matches){
+          api.abstractScene?.stageTravel?.();
           title.classList.remove("stage-enter");
           void title.offsetWidth;
           title.classList.add("stage-enter");
@@ -376,6 +377,7 @@
     api.latestState = state;
     if (api.abstractScene) api.abstractScene.scenery = { stage: state.stage, babaHits: state.cz?.babaSandwichHits || 0 };
     if (api.abstractScene) api.abstractScene.battleEnabled = state.mode === "cz" && state.cz?.key === "shibaku";
+    api.abstractScene?.bonusProgress?.(state.mode === "bonus" && state.bonus ? (state.bonus.coins || 0) / Math.max(1, state.bonus.maxCoins || 1) : 0);
     if (api.battleHeld) return;
     if (api.challengeFailureHeld) return;
     if (Date.now() < api.resultUntil) return;
@@ -467,6 +469,65 @@
       machineWindow?.classList.remove("ichikaku-red", "ichikaku-blue");
       screen?.classList.remove("ichikaku-signal", "ichikaku-red", "ichikaku-blue");
     }, reducedMotion.matches ? 200 : 1800);
+  };
+
+  // Notices: the look (train / travel, and its grade) is picked from the
+  // already-resolved result with a presentation-only random stream, so the
+  // game lottery is never consumed. Gold appears only with CZ or a win.
+  let noticeSeed = (Date.now() ^ 0x5bd1e995) >>> 0 || 1;
+  const noticeRandom = () => {
+    noticeSeed ^= noticeSeed << 13; noticeSeed >>>= 0;
+    noticeSeed ^= noticeSeed >>> 17;
+    noticeSeed ^= noticeSeed << 5; noticeSeed >>>= 0;
+    return noticeSeed / 4294967296;
+  };
+  const NOTICE_TABLE = {
+    none: [0.03, [0.9, 0.1, 0]],
+    weak: [0.07, [0.75, 0.25, 0]],
+    strong: [0.14, [0.6, 0.4, 0]],
+    cz: [0.45, [0.45, 0.45, 0.1]],
+    win: [0.6, [0.3, 0.5, 0.2]],
+  };
+  api.noticeCue = (cue = {}) => {
+    if (reducedMotion.matches || !api.abstractScene?.notice) return;
+    const key = cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none";
+    const [rate, weights] = NOTICE_TABLE[key];
+    if (noticeRandom() >= rate) return;
+    let roll = noticeRandom() * (weights[0] + weights[1] + weights[2]);
+    let grade = 0;
+    while (grade < 2 && roll >= weights[grade]) { roll -= weights[grade]; grade += 1; }
+    api.abstractScene.notice(["normal", "express", "gold"][grade], noticeRandom() < 0.5 ? 1 : -1);
+  };
+
+  // CZ entry "発展": rush forward, black hold, the title flies into the
+  // camera, then the CZ scene breaks in. Kept under two seconds.
+  api.czDevelop = (before) => {
+    const ceiling = (before?.currentGames || 0) + 1 >= (window.ShibakuBT?.ceilingGames || Infinity);
+    const screen = document.querySelector("#lcdScreen");
+    const kicker = document.querySelector("#lcdKicker");
+    const title = document.querySelector("#lcdTitle");
+    const subtitle = document.querySelector("#lcdSubtitle");
+    const rushMs = ceiling ? 800 : 650;
+    api.developing = true;
+    const token = holdPresentation(1800);
+    api.abstractScene?.develop?.({ rushMs });
+    if (screen && kicker && title && subtitle) {
+      screen.classList.add("develop-rush");
+      kicker.textContent = "";
+      title.textContent = "";
+      subtitle.textContent = "";
+    }
+    schedulePresentation(token, () => {
+      if (title) title.textContent = "発展";
+      screen?.classList.add("develop-title");
+    }, rushMs);
+    schedulePresentation(token, () => {
+      screen?.classList.remove("develop-rush", "develop-title");
+      api.developing = false;
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, rushMs + 800);
+    scheduleEffect(() => { api.developing = false; }, 2200);
   };
 
   api.bonusConfirmed = (bonusType) => {
@@ -576,14 +637,25 @@
       screen.className = `lcd-screen bonus-result mode-${isBlue ? "bonus-blue" : isReg ? "bonus-reg" : "bonus-red"}`;
       screen.dataset.visualMode = "result";
       kicker.textContent = "BONUS RESULT";
-      title.textContent = `${coins} 枚`;
       subtitle.textContent = `${isBlue ? "青7 BIG" : isReg ? "REG BONUS" : "赤7 BIG"}　獲得枚数`;
+      // Count up in a handful of ticks, then stamp the final figure.
+      const steps = reducedMotion.matches ? 1 : 9;
+      title.dataset.count = steps === 1 ? "final" : "run";
+      title.textContent = steps === 1 ? `${coins} 枚` : "0 枚";
+      for (let step = 1; step <= steps; step += 1) {
+        const value = Math.round(coins * (step / steps) ** 0.6);
+        schedulePresentation(token, () => {
+          title.dataset.count = step === steps ? "final" : "run";
+          title.textContent = `${value} 枚`;
+        }, 120 + (step - 1) * 110);
+      }
       meter.style.width = "100%";
     }
     document.documentElement.dataset.lcdMode = "result";
     api.burst = 2.2;
     api.abstractScene?.setPresentation("bonus", isBlue ? 1 : isReg ? 2 : 0, { duration: 0.3, pulse: 2 });
     api.abstractScene?.pulse(2);
+    api.abstractScene?.resultPullout?.(durationMs);
     api.abstractScene?.impact?.({ strength: 0.45, hold: 0, color: isBlue ? 0x2f8fff : isReg ? 0xffc86a : 0xff2a1f, flash: 0.5 });
     flash("hit");
     schedulePresentation(token, () => {
@@ -722,7 +794,7 @@
     const cruisingBell = before.mode === "at" && after.mode === "at" && after.displayRoleKey === "bell";
     const hit = after.bannerTone === "hit" && !cruisingBell;
     api.targetIntensity = after.mode === "at" || after.mode === "tama" ? 0.42 : after.mode === "bonus" || after.mode === "bonusReady" ? 0.82 : after.mode === "cz" ? (after.cz?.key === "unko" ? .32 : .68) : .22;
-    if (before.mode !== "cz" && after.mode === "cz") {
+    if (before.mode !== "cz" && after.mode === "cz" && !api.developing) {
       // Reaching the ceiling earns a longer blackout before the release.
       const ceiling = (before.currentGames || 0) + 1 >= (window.ShibakuBT?.ceilingGames || Infinity);
       api.abstractScene?.impact?.({ strength: ceiling ? 0.95 : 0.6, hold: ceiling ? 0.6 : 0.22, color: 0xffa24a, rays: ceiling ? 0.9 : 0.3 });

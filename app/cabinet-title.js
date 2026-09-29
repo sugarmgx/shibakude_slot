@@ -226,7 +226,7 @@
       this.camera.aspect=w/h;this.camera.position.set(w/2,h/2,distance);this.camera.updateProjectionMatrix();
       const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const text=this.node.textContent.trim(),classes=this.screen.className;
-      const visible=/(mode-bonus-(red|blue|reg|ready)|mode-boost|mode-ending|battle-win)/.test(classes)||/^(WIN|玉獲得|開米確定|BONUS確定)$/.test(text);
+      const visible=/(mode-bonus-(red|blue|reg|ready)|mode-boost|mode-ending|battle-win|develop-title)/.test(classes)||/^(WIN|玉獲得|開米確定|BONUS確定)$/.test(text);
       const eligible=visible&&text&&[...text].every(c=>this.font.data.glyphs[c]);
       this.node.classList.toggle('has-3d-title',Boolean(eligible));
       if(!eligible){this.signature=null;this.group.visible=false;}
@@ -240,7 +240,13 @@
             letter.parts.forEach((g,i)=>{const material=i>=2?[this.materials[2],this.materials[3]]:this.materials[i];const mesh=new this.T.Mesh(g,material);mesh.position.z=[-18,0,9,12.75][i];pivot.add(mesh);});
             return {pivot,x:letter.x,y:letter.y,phase:index*2.399963,delay:index*.065};
           });
-          const color=/mode-bonus-red/.test(classes)?0xe72412:/mode-bonus-blue/.test(classes)?0x158fe8:/mode-boost/.test(classes)?0x19bd70:0xe9a527;
+          // Result count-up: each tick lands at once with a small pop; only the
+          // final figure stamps. "発展" is driven by the dedicated fly-in below.
+          const counting=/\bbonus-result\b/.test(classes)&&this.node.dataset.count;
+          if(counting){this.entryDelay=0;this.startedAt=now-((this.letters.length-1)*.065+1.05)*1000;this.stamped=this.node.dataset.count!=='final';}
+          if(/develop-title/.test(classes))this.stamped=true;
+          this.materials[2].emissiveIntensity=/develop-title/.test(classes)?.08:.25;
+          const color=/develop-title/.test(classes)?0xd07a0c:/mode-bonus-red/.test(classes)?0xe72412:/mode-bonus-blue/.test(classes)?0x158fe8:/mode-boost/.test(classes)?0x19bd70:0xe9a527;
           this.materials[2].color.set(color);this.materials[2].emissive.set(color);
         }
         const rawBox=this.node.getBoundingClientRect();
@@ -261,6 +267,14 @@
           const landed=age-this.entryDelay-(this.letters.length-1)*.065-1.05;
           if(!reduced&&landed>0&&landed<.6)this.group.scale.multiplyScalar(1+Math.exp(-landed*9)*Math.sin(landed*28)*.035);
           if(!reduced&&landed>0&&!this.stamped){this.stamped=true;this.owner.impact?.({strength:.32,hold:0,flash:.25,color:this.materials[2].color.getHex()});}
+          if(classes.includes('develop-title')){
+            // "発展" comes straight down the tunnel at the camera and slams.
+            const t=reduced?1:Math.min(1,age/.3),ease=t*t;
+            for(const letter of this.letters){letter.pivot.visible=true;letter.pivot.position.set(letter.x,letter.y,-distance/fit*6*(1-ease));letter.pivot.rotation.set(0,0,0);}
+            this.group.rotation.set(0,0,(1-t)*.25);
+            // Sized from the panel, not the DOM line, so the word fills the LCD.
+            this.group.scale.setScalar(host.height*.5/(this.size.y+24)*(1+(!reduced&&age>.3?Math.exp(-(age-.3)*11)*.28:0)));
+          }
           if(classes.includes('bt-announcement')){
             const t=reduced?1:Math.max(0,Math.min(1,age/.65)),remaining=Math.pow(1-t,3);
             for(const letter of this.letters){

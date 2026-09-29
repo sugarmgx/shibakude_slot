@@ -2918,6 +2918,16 @@ function beginPendingSpin(afterState, force = null) {
   afterState.displayMissedRole = null;
   ui.spinning = true;
   window.ShibakuCabinet?.feedback("lever");
+  // LCD notice cue: what this game has already resolved to, handed to the
+  // presentation layer only. The notice picks its own look with its own
+  // random stream; the game lottery is never consumed or changed.
+  if (state.mode === "normal" && !middleCherryResult) {
+    window.ShibakuEffects?.noticeCue?.({
+      win: !["normal", "cz"].includes(afterState.mode),
+      cz: afterState.mode === "cz",
+      rare: isRareResult ? rareKind : "none",
+    });
+  }
   ui.spinningReels = [true, true, true];
   ui.deceleratingReels = [false, false, false];
   ui.reelPositions = state.reelStops.map((stopIndex, reelIndex) => wrapIndex(stopIndex, REEL_STRIPS[reelIndex].length));
@@ -3615,6 +3625,13 @@ function finishPendingSpin() {
   ui.displayReels = null;
   ui.pendingSpin = null;
   ui.mainActionPromise = null;
+  const enteredCz = beforeState.mode !== "cz" && afterState.mode === "cz";
+  if (enteredCz && !ui.debugFast && window.ShibakuEffects?.czDevelop) {
+    // "発展": hold the LCD before render() so the CZ scene waits for the
+    // rush / title fly-in; the title then breaks into the CZ scene.
+    window.ShibakuEffects.czDevelop(beforeState, afterState);
+    lockMainAction(1850, "cz-develop");
+  }
   render();
   playTransitionSounds(beforeState, afterState);
   playResultSound(afterState);

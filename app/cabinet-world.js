@@ -481,7 +481,7 @@
       const battle = kind === "challenge" && variant === 2 && o.battleEnabled;
       const boost = kind === "boost", bonus = kind === "bonus";
       const speed = boost ? (variant ? 24 : 16) : bonus ? (variant === 1 ? 18 : variant === 2 ? 4 : 10) : battle ? 0 : .15;
-      this.travel += dt * speed;
+      this.travel += dt * speed * (o.speedBoost || 1);
       this.corridor.scale.x = Math.max(1, o.camera.aspect / 1.8);
       this.portals.forEach((p,i) => {
         p.position.z = 7 - ((i*4 + this.travel) % 72);

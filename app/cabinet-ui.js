@@ -57,7 +57,7 @@
     // PLACEHOLDER: replace the wordmark contents with a local alpha image.
     const marquee = document.createElement("div");
     marquee.className = "cabinet-marquee";
-    marquee.innerHTML = '<div class="cabinet-logo" aria-label="しばくでスロット BT">しばくでスロット BT</div>';
+    marquee.innerHTML = '<div class="cabinet-logo" aria-label="しばくでスロット">しばくでスロット</div>';
     machine.prepend(marquee);
     stopPanel.querySelectorAll(".stop-button").forEach((button, index) => { button.dataset.face = String(index + 1); });
     move("#autoButton, #soundButton", consolePanel.querySelector(".service-switches"));
