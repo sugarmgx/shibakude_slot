@@ -425,7 +425,11 @@
     screen.className = `lcd-screen mode-challenge ${won ? "battle-win" : "battle-loss"}`;
     document.querySelector("#lcdTitle").textContent = won ? "WIN" : "";
     document.querySelector("#lcdSubtitle").textContent = "";
-    if (won) { flash("hit"); api.abstractScene?.pulse(4); }
+    if (won) {
+      flash("hit");
+      api.abstractScene?.pulse(4);
+      api.abstractScene?.impact?.({ strength: 1, hold: 0.12, color: 0xffc247, rays: 1 });
+    }
     else glass.classList.add("is-broken");
   };
   api.battleEnd = (preserveGlass = false) => {
@@ -455,6 +459,7 @@
     }
     api.burst = 2.6;
     api.abstractScene?.pulse(2.4);
+    api.abstractScene?.impact?.({ strength: 0.7, hold: 0.05, color: isBlue ? 0x2f8fff : 0xff3322, rays: 0.6 });
     flash("hit");
     scheduleEffect(() => {
       machineWindow?.classList.remove("ichikaku-red", "ichikaku-blue");
@@ -470,6 +475,12 @@
     machineWindow?.classList.add("bonus-confirmed", className);
     api.burst = 3;
     api.abstractScene?.pulse(2.8);
+    api.abstractScene?.impact?.({
+      strength: bonusType === "REG" ? 0.7 : 1.1,
+      hold: 0.07,
+      color: bonusType === "BLUE_BIG" ? 0x2f8fff : bonusType === "RED_BIG" ? 0xff2a1f : 0xffc86a,
+      rays: bonusType === "REG" ? 0.5 : 1.2,
+    });
     flash("hit");
     scheduleEffect(() => {
       screen?.classList.remove("bonus-confirmed", className);
@@ -526,6 +537,7 @@
     api.targetIntensity = 1;
     api.burst = 4.2;
     api.abstractScene?.setPresentation("bonus", 1, { duration: 0.22, pulse: 3.5, clearFeedback: true });
+    api.abstractScene?.impact?.({ strength: 1.2, hold: 0.45, color: 0x2f8fff, rays: 1.3 });
     if (screen && kicker && title && subtitle && meter) {
       screen.className = "lcd-screen mode-bonus-blue long-freeze";
       screen.dataset.visualMode = "longFreeze";
@@ -570,6 +582,7 @@
     api.burst = 2.2;
     api.abstractScene?.setPresentation("bonus", isBlue ? 1 : isReg ? 2 : 0, { duration: 0.3, pulse: 2 });
     api.abstractScene?.pulse(2);
+    api.abstractScene?.impact?.({ strength: 0.45, hold: 0, color: isBlue ? 0x2f8fff : isReg ? 0xffc86a : 0xff2a1f, flash: 0.5 });
     flash("hit");
     schedulePresentation(token, () => {
       api.resultUntil = 0;
@@ -707,6 +720,11 @@
     const cruisingBell = before.mode === "at" && after.mode === "at" && after.displayRoleKey === "bell";
     const hit = after.bannerTone === "hit" && !cruisingBell;
     api.targetIntensity = after.mode === "at" || after.mode === "tama" ? 0.42 : after.mode === "bonus" || after.mode === "bonusReady" ? 0.82 : after.mode === "cz" ? (after.cz?.key === "unko" ? .32 : .68) : .22;
+    if (before.mode !== "cz" && after.mode === "cz") {
+      // Reaching the ceiling earns a longer blackout before the release.
+      const ceiling = (before.currentGames || 0) + 1 >= (window.ShibakuBT?.ceilingGames || Infinity);
+      api.abstractScene?.impact?.({ strength: ceiling ? 0.95 : 0.6, hold: ceiling ? 0.6 : 0.22, color: 0xffa24a, rays: ceiling ? 0.9 : 0.3 });
+    }
     if (modeChanged || hit) {
       api.burst = hit ? 1.9 : 1.15;
       api.abstractScene?.pulse(hit ? 2 : 1.15);

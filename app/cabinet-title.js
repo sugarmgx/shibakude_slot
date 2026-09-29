@@ -160,6 +160,59 @@
       this.payoutMaterials[2].emissiveIntensity=.20;
       return true;
     }
+    // Reel-7 hero for the moment the 7s line up: slams in out of the whiteout,
+    // settles with a spring, then rushes through the camera ahead of the title.
+    buildHero() {
+      const T=this.T,shape=new T.Shape();
+      shape.moveTo(-44,52);shape.lineTo(50,52);shape.lineTo(50,37);
+      shape.quadraticCurveTo(12,4,4,-52);shape.lineTo(-25,-52);
+      shape.quadraticCurveTo(-14,-2,20,31);shape.lineTo(-24,31);
+      shape.lineTo(-28,20);shape.lineTo(-44,20);shape.closePath();
+      const italic=new T.Matrix4().set(1,.2,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+      const body=new T.ExtrudeGeometry(shape,{depth:20,bevelEnabled:true,bevelThickness:5,bevelSize:3.4,bevelSegments:5,curveSegments:18});
+      const plate=new T.ExtrudeGeometry(shape,{depth:8,bevelEnabled:true,bevelThickness:2,bevelSize:9,bevelSegments:3,curveSegments:18});
+      for(const g of [body,plate]){g.applyMatrix4(italic);g.center();}
+      this.heroFace=new T.MeshStandardMaterial({color:0xc00810,emissive:0xc00810,emissiveIntensity:.4,metalness:.08,roughness:.34,envMapIntensity:.75});
+      this.heroChrome=new T.MeshStandardMaterial({color:0xe8eef4,metalness:1,roughness:.16,envMapIntensity:2.2});
+      this.heroPlate=new T.MeshStandardMaterial({color:0x06080c,emissive:0xd8141c,emissiveIntensity:.22,metalness:.9,roughness:.34,envMapIntensity:1.2});
+      this.heroGeometries=[body,plate];
+      this.heroGroup=new T.Group();this.heroGroup.visible=false;
+      const bodyMesh=new T.Mesh(body,[this.heroFace,this.heroChrome]);
+      const plateMesh=new T.Mesh(plate,this.heroPlate);plateMesh.position.z=-12;
+      this.heroGroup.add(plateMesh,bodyMesh);this.scene.add(this.heroGroup);
+      // Cut-in shade: darkens the LCD behind the 7 only, never the 7 itself.
+      this.heroShade=new T.Mesh(new T.PlaneGeometry(1,1),new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0,depthWrite:false}));
+      this.heroShade.renderOrder=-1;this.heroShade.visible=false;this.scene.add(this.heroShade);this.heroGeometries.push(this.heroShade.geometry);
+      this.heroHeight=new T.Box3().setFromObject(this.heroGroup).getSize(new T.Vector3()).y;
+    }
+    renderHero(now,w,h,host,distance,reduced) {
+      const machine=document.querySelector('.machine-window');
+      const color=machine?.classList.contains('bonus-confirm-blue')?'blue':machine?.classList.contains('bonus-confirm-red')?'red':null;
+      const confirmed=Boolean(color&&machine.classList.contains('bonus-confirmed'));
+      if(confirmed&&!this.heroStarted){
+        if(!this.heroGroup)this.buildHero();
+        this.heroStarted=now;
+        const hue=color==='blue'?0x0a62d8:0xc00810;
+        this.heroFace.color.set(hue);this.heroFace.emissive.set(hue);this.heroPlate.emissive.set(hue);
+      }
+      if(!confirmed&&this.heroStarted&&now-this.heroStarted>1200)this.heroStarted=0;
+      if(!this.heroStarted||!this.heroGroup){if(this.heroGroup)this.heroGroup.visible=this.heroShade.visible=false;return false;}
+      const t=(now-this.heroStarted)/1000,enter=.07,exitAt=.56,exitEnd=.78;
+      if(t<enter||t>=exitEnd||(reduced&&t>=.5)){this.heroGroup.visible=this.heroShade.visible=false;return t<enter;}
+      const a=t-enter,p=Math.min(1,a/.2),out=1-Math.pow(1-p,3);
+      const settle=a>.2?Math.exp(-(a-.2)*13)*Math.cos((a-.2)*38):0;
+      const rush=t>exitAt?Math.pow((t-exitAt)/(exitEnd-exitAt),3):0;
+      const fit=h*.64/this.heroHeight;
+      this.heroGroup.visible=true;
+      this.heroGroup.scale.setScalar(fit*(1+settle*.06));
+      this.heroGroup.position.set(w*.5,h*.5,reduced?0:distance*(.62*(1-out)+.93*rush));
+      this.heroGroup.rotation.set(-.1*(1-out),reduced?0:(1-out)*Math.PI*2.2+Math.sin(a*1.7)*.1,0);
+      this.heroShade.visible=true;this.heroShade.position.set(w*.5,h*.5,-distance*.2);this.heroShade.scale.set(w*1.4,h*1.4,1);
+      this.heroShade.material.opacity=.62*Math.min(1,a/.05)*(1-rush);
+      this.heroFace.emissiveIntensity=.16+.7*Math.exp(-a*7)+rush*.6;
+      this.heroPlate.emissiveIntensity=.35+.6*Math.exp(-a*5);
+      return true;
+    }
     render(now) {
       if(!this.node||!this.screen||!this.font)return;
       const host=this.owner.host.getBoundingClientRect();
@@ -204,12 +257,13 @@
       }
       this.envRotationUniform.value=(now*.000035)%(Math.PI*2);
       const payoutVisible=this.renderPayout(now,host,w,h,distance,reduced);
-      if(!eligible&&!payoutVisible)return;
+      const heroVisible=this.renderHero(now,w,h,host,distance,reduced);
+      if(!eligible&&!payoutVisible&&!heroVisible)return;
       const titleAge=this.startedAt ? Math.max(0,(now-this.startedAt)/1000) : 0;
       this.sweep.position.x=reduced?150:Math.sin(Math.min(titleAge,1.2)/1.2*Math.PI-Math.PI/2)*240;
       const renderer=this.owner.renderer,auto=renderer.autoClear;renderer.autoClear=false;renderer.clearDepth();renderer.render(this.scene,this.camera);renderer.autoClear=auto;
     }
-    dispose(){this.node?.classList.remove('has-3d-title');this.payoutNode?.classList.remove('has-3d-payout');this.cache.forEach(item=>item.geometries.forEach(g=>g.dispose()));this.materials.forEach(m=>m.dispose());this.payoutMaterials.forEach(m=>m.dispose());this.metalTexture?.dispose();}
+    dispose(){this.heroGeometries?.forEach(g=>g.dispose());[this.heroFace,this.heroChrome,this.heroPlate,this.heroShade?.material].forEach(m=>m?.dispose());this.node?.classList.remove('has-3d-title');this.payoutNode?.classList.remove('has-3d-payout');this.cache.forEach(item=>item.geometries.forEach(g=>g.dispose()));this.materials.forEach(m=>m.dispose());this.payoutMaterials.forEach(m=>m.dispose());this.metalTexture?.dispose();}
   }
   window.CabinetTitle=CabinetTitle;
 })();

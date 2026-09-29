@@ -427,3 +427,7 @@ button:focus-visible { outline:2px solid #f1d29b;outline-offset:5px; }
 @media (prefers-reduced-motion:reduce) {
   .cabinet-console .stop-button,.cabinet-console .stop-button::before { transition:none; }
 }
+
+/* The reel-7 cut-in owns the LCD for its first beat. */
+.lcd-screen.bonus-confirmed #lcdTitle.has-3d-title::after,
+.machine-panel:has(.machine-window.bonus-confirmed) #lcdTitle.has-3d-title::after { opacity: 0; }

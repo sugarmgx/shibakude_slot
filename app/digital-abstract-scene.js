@@ -833,6 +833,278 @@
       }));
       this.displayQuad = new THREE.Mesh(quadGeometry, this.displayMaterial);
       this.displayScene.add(this.displayQuad);
+      this.createImpactPipeline(quadGeometry);
+    }
+
+    // Final optical stage: the finished LCD frame (scene + 3D lettering) is
+    // bloomed from its own highlights, then an impact layer adds the
+    // hold / release beat (darken, whiteout, shockwave, colour fringing).
+    createImpactPipeline(quadGeometry) {
+      const { THREE } = this;
+      const renderer = this.renderer;
+      this.hdrTargets = Boolean(renderer.capabilities.isWebGL2 && renderer.extensions.has("EXT_color_buffer_float"));
+      this.bloomTargets = [];
+      this.impactFx = null;
+      this.fxScene = new THREE.Scene();
+      this.fxQuad = new THREE.Mesh(quadGeometry, null);
+      this.fxQuad.frustumCulled = false;
+      this.fxScene.add(this.fxQuad);
+      const vertexShader = `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `;
+      this.bloomDownMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uTexture: { value: null },
+          uTexel: { value: new THREE.Vector2(1, 1) },
+          uThreshold: { value: 0.74 },
+          uPrefilter: { value: 1 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uTexture;
+          uniform vec2 uTexel;
+          uniform float uThreshold;
+          uniform float uPrefilter;
+          vec3 tap(vec2 offset) { return texture2D(uTexture, clamp(vUv + offset * uTexel, vec2(0.0005), vec2(0.9995))).rgb; }
+          void main() {
+            vec3 color = tap(vec2(0.0)) * 0.5
+              + (tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0))) * 0.125;
+            if (uPrefilter > 0.5) {
+              float brightness = max(color.r, max(color.g, color.b));
+              float knee = uThreshold * 0.5;
+              float soft = clamp(brightness - uThreshold + knee, 0.0, 2.0 * knee);
+              soft = soft * soft / (4.0 * knee + 0.0001);
+              color *= max(soft, brightness - uThreshold) / max(brightness, 0.0001);
+            }
+            gl_FragColor = vec4(min(color, vec3(6.0)), 1.0);
+          }
+        `,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      this.bloomUpMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uTexture: { value: null },
+          uTexel: { value: new THREE.Vector2(1, 1) },
+          uWeight: { value: 1 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uTexture;
+          uniform vec2 uTexel;
+          uniform float uWeight;
+          vec3 tap(vec2 offset) { return texture2D(uTexture, clamp(vUv + offset * uTexel, vec2(0.0005), vec2(0.9995))).rgb; }
+          void main() {
+            vec3 color = tap(vec2(0.0)) * 4.0
+              + (tap(vec2(-1.0, 0.0)) + tap(vec2(1.0, 0.0)) + tap(vec2(0.0, -1.0)) + tap(vec2(0.0, 1.0))) * 2.0
+              + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0));
+            gl_FragColor = vec4(color / 16.0 * uWeight, 1.0);
+          }
+        `,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      this.impactMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uScene: { value: null },
+          uBloom: { value: null },
+          uResolution: { value: new THREE.Vector2(1, 1) },
+          uCenter: { value: new THREE.Vector2(0.5, 0.52) },
+          uShake: { value: new THREE.Vector2(0, 0) },
+          uZoom: { value: 1 },
+          uBloomStrength: { value: 0.2 },
+          uImpactAge: { value: 99 },
+          uImpactStrength: { value: 0 },
+          uImpactColor: { value: new THREE.Color(1, 1, 1) },
+          uWarp: { value: 1 },
+          uHold: { value: 0 },
+          uFlash: { value: 0 },
+          uRays: { value: 0 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uScene;
+          uniform sampler2D uBloom;
+          uniform vec2 uResolution;
+          uniform vec2 uCenter;
+          uniform vec2 uShake;
+          uniform float uZoom;
+          uniform float uBloomStrength;
+          uniform float uImpactAge;
+          uniform float uImpactStrength;
+          uniform vec3 uImpactColor;
+          uniform float uWarp;
+          uniform float uHold;
+          uniform float uFlash;
+          uniform float uRays;
+
+          vec3 sampleScene(vec2 uv) { return texture2D(uScene, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
+          vec3 sampleBloom(vec2 uv) { return texture2D(uBloom, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
+          // Untouched below the knee, so ordinary frames keep their grade;
+          // only whiteouts and stacked glow roll off instead of clipping flat.
+          vec3 shoulder(vec3 color) {
+            vec3 over = max(color - 0.9, 0.0);
+            return min(color, vec3(0.9)) + 0.1 * (1.0 - exp(-over * 6.0));
+          }
+
+          void main() {
+            vec2 aspect = vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
+            vec2 uv = (vUv - uCenter) / uZoom + uCenter + uShake;
+            vec2 delta = (uv - uCenter) * aspect;
+            float dist = length(delta);
+            vec2 dir = dist > 0.0001 ? delta / dist / aspect : vec2(0.0);
+            float live = uImpactStrength * (1.0 - smoothstep(0.0, 1.15, uImpactAge));
+            float radius = uImpactAge * 2.1;
+            float ring = exp(-pow((dist - radius) / 0.075, 2.0)) * live;
+            vec2 warped = uv - dir * ring * 0.032 * uWarp;
+            float fringe = (0.0042 * live * exp(-uImpactAge * 3.2) + ring * 0.006) * uWarp + uHold * 0.0014;
+            vec3 color = vec3(
+              sampleScene(warped + dir * fringe).r,
+              sampleScene(warped).g,
+              sampleScene(warped - dir * fringe).b
+            );
+            color *= 1.0 - uHold * (0.5 + 0.42 * smoothstep(0.12, 0.85, dist));
+            color += sampleBloom(warped) * uBloomStrength;
+            if (uRays > 0.001) {
+              vec3 rays = vec3(0.0);
+              vec2 stepUv = (warped - uCenter) * 0.055;
+              vec2 cursor = warped;
+              float weight = 1.0;
+              for (int index = 0; index < 10; index++) {
+                cursor -= stepUv;
+                rays += sampleBloom(cursor) * weight;
+                weight *= 0.85;
+              }
+              color += rays * 0.08 * uRays;
+            }
+            color += uImpactColor * ring * 0.5;
+            color += mix(vec3(1.0), uImpactColor, 0.35) * uFlash;
+            gl_FragColor = vec4(shoulder(color), 1.0);
+          }
+        `,
+        depthTest: false,
+        depthWrite: false,
+      }));
+    }
+
+    makeFxTarget(width, height, { depth = false, samples = 0 } = {}) {
+      const { THREE } = this;
+      const target = new THREE.WebGLRenderTarget(width, height, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: this.hdrTargets ? THREE.HalfFloatType : THREE.UnsignedByteType,
+        depthBuffer: depth,
+        stencilBuffer: false,
+      });
+      target.texture.generateMipmaps = false;
+      if (samples && this.renderer.capabilities.isWebGL2) target.samples = samples;
+      this.renderTargets.push(target);
+      return target;
+    }
+
+    // Starts a hold → release beat. `hold` seconds of darkening and a slow
+    // push-in precede the hit; the hit itself whites out, rings and settles.
+    impact(options = {}) {
+      const { THREE } = this;
+      const now = performance.now();
+      const hold = clamp(Number(options.hold) || 0, 0, 1.2);
+      const strength = clamp(Number(options.strength) || 1, 0, 1.5);
+      if (this.impactFx && now < this.impactFx.releaseAt + 180 && this.impactFx.strength > strength) return;
+      this.impactFx = {
+        startedAt: now,
+        releaseAt: now + hold * 1000,
+        hold,
+        strength,
+        color: new THREE.Color(options.color ?? 0xffffff),
+        rays: clamp(Number(options.rays) || 0, 0, 1.5),
+        flash: clamp(options.flash ?? 1, 0, 1.5),
+        released: false,
+      };
+    }
+
+    updateImpact(now) {
+      const uniforms = this.impactMaterial.uniforms;
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      const weights = this.presentationWeights;
+      let bloom = 0.1 * weights.normal + 0.16 * weights.challenge + 0.22 * weights.bonus + 0.2 * weights.boost
+        + this.eventPulse * 0.02;
+      let hold = 0, zoom = 1, flash = 0, rays = 0, age = 99, strength = 0, shake = 0;
+      const fx = this.impactFx;
+      if (fx) {
+        if (now < fx.releaseAt) {
+          const progress = clamp((now - fx.startedAt) / Math.max(1, fx.releaseAt - fx.startedAt), 0, 1);
+          hold = smooth(clamp(progress * 2.4, 0, 1)) * Math.min(1, 0.55 + fx.hold);
+          zoom = 1 + progress * progress * 0.03 * fx.strength;
+        } else {
+          if (!fx.released) {
+            fx.released = true;
+            this.pulse(2.2 * fx.strength);
+          }
+          age = (now - fx.releaseAt) / 1000;
+          strength = fx.strength;
+          hold = Math.min(1, 0.55 + fx.hold) * Math.exp(-age * 22);
+          flash = fx.flash * fx.strength * Math.exp(-age * 11) * 0.9;
+          zoom = 1 + fx.strength * 0.055 * Math.exp(-age * 5.5) * (1 - Math.exp(-age * 40));
+          rays = fx.rays * fx.strength * Math.exp(-age * 2.1);
+          shake = fx.strength * 0.0055 * Math.exp(-age * 8);
+          bloom += fx.strength * 0.42 * Math.exp(-age * 3);
+          if (age > 2.6) this.impactFx = null;
+        }
+        uniforms.uImpactColor.value.copy(fx.color);
+      }
+      if (reduced) { zoom = 1; shake = 0; flash *= 0.4; }
+      uniforms.uWarp.value = reduced ? 0 : 1;
+      uniforms.uBloomStrength.value = bloom;
+      uniforms.uImpactAge.value = age;
+      uniforms.uImpactStrength.value = strength;
+      uniforms.uHold.value = hold;
+      uniforms.uFlash.value = flash;
+      uniforms.uRays.value = rays;
+      uniforms.uZoom.value = zoom;
+      uniforms.uShake.value.set(Math.sin(now * 0.093) * shake, Math.cos(now * 0.117) * shake * 0.7);
+    }
+
+    renderImpact(now) {
+      const renderer = this.renderer;
+      const autoClear = renderer.autoClear;
+      this.updateImpact(now);
+      // Bloom mip chain: threshold into the first level, then downsample.
+      let source = this.compositeTarget;
+      this.fxQuad.material = this.bloomDownMaterial;
+      this.bloomTargets.forEach((target, index) => {
+        this.bloomDownMaterial.uniforms.uTexture.value = source.texture;
+        this.bloomDownMaterial.uniforms.uTexel.value.set(1 / source.width, 1 / source.height);
+        this.bloomDownMaterial.uniforms.uPrefilter.value = index === 0 ? 1 : 0;
+        renderer.setRenderTarget(target);
+        renderer.render(this.fxScene, this.postCamera);
+        source = target;
+      });
+      // Tent upsample accumulates each coarser level into the finer one.
+      renderer.autoClear = false;
+      this.fxQuad.material = this.bloomUpMaterial;
+      for (let index = this.bloomTargets.length - 1; index > 0; index -= 1) {
+        const from = this.bloomTargets[index];
+        this.bloomUpMaterial.uniforms.uTexture.value = from.texture;
+        this.bloomUpMaterial.uniforms.uTexel.value.set(1 / from.width, 1 / from.height);
+        this.bloomUpMaterial.uniforms.uWeight.value = 0.85;
+        renderer.setRenderTarget(this.bloomTargets[index - 1]);
+        renderer.render(this.fxScene, this.postCamera);
+      }
+      renderer.autoClear = autoClear;
+      this.fxQuad.material = this.impactMaterial;
+      this.impactMaterial.uniforms.uScene.value = this.compositeTarget.texture;
+      this.impactMaterial.uniforms.uBloom.value = this.bloomTargets[0].texture;
+      renderer.setRenderTarget(null);
+      renderer.render(this.fxScene, this.postCamera);
     }
 
     makeRenderTarget(width, height, depthBuffer = false) {
@@ -875,6 +1147,18 @@
         this.feedbackWrite = this.makeRenderTarget(bufferWidth, bufferHeight);
         this.feedbackMaterial.uniforms.uResolution.value.set(bufferWidth, bufferHeight);
         this.displayMaterial.uniforms.uResolution.value.set(width, height);
+        const ratio = this.renderer.getPixelRatio();
+        const fullWidth = Math.max(2, Math.floor(width * ratio));
+        const fullHeight = Math.max(2, Math.floor(height * ratio));
+        this.compositeTarget = this.makeFxTarget(fullWidth, fullHeight, { depth: true, samples: 4 });
+        this.bloomTargets = [];
+        for (let level = 1; level <= 5; level += 1) {
+          this.bloomTargets.push(this.makeFxTarget(
+            Math.max(2, Math.floor(fullWidth / 2 ** level)),
+            Math.max(2, Math.floor(fullHeight / 2 ** level)),
+          ));
+        }
+        this.impactMaterial.uniforms.uResolution.value.set(fullWidth, fullHeight);
         this.clearFeedback();
       }
     }
@@ -1305,9 +1589,10 @@
       this.displayMaterial.uniforms.uDensity.value = visual.density;
       this.displayMaterial.uniforms.uCut.value = this.cutPulse;
       this.displayMaterial.uniforms.uClarity.value = structureClarity;
-      this.renderer.setRenderTarget(null);
+      this.renderer.setRenderTarget(this.compositeTarget);
       this.renderer.render(this.displayScene, this.postCamera);
       this.title3D?.render(now);
+      this.renderImpact(now);
 
       const swap = this.feedbackRead;
       this.feedbackRead = this.feedbackWrite;
