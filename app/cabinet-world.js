@@ -23,7 +23,7 @@
       this.steel = material({ color: 0x455569, specular: 0xffffff });
       this.enamel = material({ color: 0xf2f4f2, specular: 0xffffff, reflectivity: .24 });
       this.glass = material({ color: 0x075d86, specular: 0xbbeeff, reflectivity: .65 });
-      this.root.add(new T.HemisphereLight(0xe9f5ff, 0x141b24, .8));
+      this.hemi = new T.HemisphereLight(0xe9f5ff, 0x141b24, .8); this.root.add(this.hemi);
       this.key = new T.PointLight(0xc8eaff, 2.5, 65);
       this.key.position.set(-5, 6, 7); this.root.add(this.key);
       this.rim = new T.PointLight(0xffb966, 2, 60);
@@ -532,6 +532,11 @@
       this.rim.color.copy(o.theme.primary);
       this.key.intensity = boost ? 1.55 : 2.5;
       this.rim.intensity = boost ? 1.7 : bonus ? 2.5 : 1.5;
+      // The platform is lit by its own tube rows (stage-kit); the generic key /
+      // rim / sky fill would flatten it, so they drop to a faint fill there.
+      const platformLit = Boolean(this.stationStage?.visible);
+      this.hemi.intensity = platformLit ? .22 : .8;
+      if (platformLit) { this.key.intensity *= .25; this.rim.intensity *= .2; }
       // Room-specific lights must not leak into the next CZ / BONUS cut.
       this.key.position.set(-5,6,7);
       this.rim.position.set(6,-1,-4);

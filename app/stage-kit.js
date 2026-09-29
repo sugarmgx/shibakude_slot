@@ -20,6 +20,25 @@
       this.textureCache = new Map();
       this.envTargets = { station: [], hall: [], lounge: [] };
       this.dummy = new this.T.Object3D();
+      const T = this.T;
+      // Per-stage light rigs: rows of line lights running along z (fluorescent
+      // tubes / ceiling strips / pendant rows). Evaluated analytically in the
+      // material shader, so every surface gets real falloff and the polished
+      // floors get proper reflections of the lights without extra passes.
+      const rig = (rows, y, color, strength, floorY, segment) => ({
+        uStageOffset: { value: new T.Vector3() },
+        uRows: { value: new T.Vector4(...[...rows, 1e4, 1e4, 1e4, 1e4].slice(0, 4)) },
+        uRowY: { value: y },
+        uLightColor: { value: new T.Color(color) },
+        uLightStrength: { value: strength },
+        uFloorY: { value: floorY },
+        uSegment: { value: new T.Vector3(...segment) },
+      });
+      this.rigs = {
+        station: rig([-5.2, -1.15, 1.15, 5.2], 3.03, 0xeaf4ff, 1.35, -2.2, [STATION_NEAR - 2.5 - 1.15, 3, 2.3 / 3]),
+        hall: rig([-5, 0, 5], 3.55, 0xf4f2ff, 1.0, -3.89, [0, 1, 1]),
+        lounge: rig([-1.3, 1.3], 1.25, 0xffc98a, 1.1, -3.89, [0, 1, 1]),
+      };
       this.loadEnvironments();
     }
 
@@ -39,7 +58,7 @@
 
     material(stage, options = {}) {
       const T = this.T;
-      const { map, normal, size = 1, ratio = 1, normalScale = 1, ...rest } = options;
+      const { map, normal, size = 1, ratio = 1, normalScale = 1, photo, ...rest } = options;
       const material = this.owner.trackMaterial(new T.MeshStandardMaterial({
         roughness: 0.6, metalness: 0, envMapIntensity: 0.45, ...rest,
       }));
@@ -47,7 +66,77 @@
       if (normal) { material.normalMap = this.texture(normal, size, { ratio }); material.normalScale.set(normalScale, normalScale); }
       if (options.emissiveMap) material.emissiveMap = this.texture(options.emissiveMap, size, { ratio });
       this.envTargets[stage]?.push(material);
+      if (this.rigs[stage]) this.photoreal(material, stage, options.photo || {});
       return material;
+    }
+
+    // Shader additions for stage surfaces: line-light irradiance, glossy
+    // reflections of the light rows on floors, grime where walls meet the
+    // floor, and low-frequency variation that breaks visible tiling.
+    photoreal(material, stage, { gloss = 0, grime = 0.6, macro = 0.6 } = {}) {
+      const rig = this.rigs[stage];
+      const local = { uGloss: { value: gloss }, uGrime: { value: grime }, uMacro: { value: macro } };
+      material.onBeforeCompile = shader => {
+        Object.assign(shader.uniforms, rig, local);
+        shader.vertexShader = "varying vec3 vStagePos;\n" + shader.vertexShader.replace("#include <project_vertex>", `#include <project_vertex>
+          vec4 stagePos = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            stagePos = instanceMatrix * stagePos;
+          #endif
+          vStagePos = (modelMatrix * stagePos).xyz;`);
+        shader.fragmentShader = `varying vec3 vStagePos;
+          uniform vec3 uStageOffset;
+          uniform vec4 uRows;
+          uniform float uRowY;
+          uniform vec3 uLightColor;
+          uniform float uLightStrength;
+          uniform float uFloorY;
+          uniform vec3 uSegment;
+          uniform float uGloss;
+          uniform float uGrime;
+          uniform float uMacro;
+          float stageHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float stageNoise(vec2 p) {
+            vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(stageHash(i), stageHash(i + vec2(1.0, 0.0)), u.x), mix(stageHash(i + vec2(0.0, 1.0)), stageHash(i + vec2(1.0, 1.0)), u.x), u.y);
+          }
+          float stageRow(int i) { return i == 0 ? uRows.x : i == 1 ? uRows.y : i == 2 ? uRows.z : uRows.w; }
+        ` + shader.fragmentShader
+          .replace("#include <map_fragment>", `#include <map_fragment>
+            vec3 stageP = vStagePos - uStageOffset;
+            float stageMacro = stageNoise(stageP.xz * 0.11 + stageP.y * 0.07) * 0.65 + stageNoise(stageP.xz * 0.53 + 3.1) * 0.35;
+            diffuseColor.rgb *= mix(1.0, 0.8 + stageMacro * 0.35, uMacro);
+            float stageFoot = 1.0 - smoothstep(0.0, 0.85, stageP.y - uFloorY);
+            diffuseColor.rgb *= 1.0 - stageFoot * uGrime * 0.4;`)
+          .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
+            roughnessFactor = clamp(roughnessFactor * mix(1.0, 0.75 + stageMacro * 0.55, uMacro), 0.04, 1.0);`)
+          .replace("#include <aomap_fragment>", `{
+              vec3 Nw = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+              vec3 Vw = normalize(cameraPosition - vStagePos);
+              vec3 lineLight = vec3(0.0);
+              for (int i = 0; i < 4; i++) {
+                vec2 d = vec2(stageRow(i) - stageP.x, uRowY - stageP.y);
+                float lambert = max(dot(Nw, normalize(vec3(d, 0.0))), 0.0);
+                lineLight += vec3(lambert / (1.0 + dot(d, d) * 0.32));
+              }
+              reflectedLight.directDiffuse += diffuseColor.rgb * uLightColor * lineLight * uLightStrength;
+              if (uGloss > 0.0 && Nw.y > 0.7) {
+                vec3 R = reflect(-Vw, Nw);
+                if (R.y > 0.015) {
+                  float travel = (uRowY - stageP.y) / R.y;
+                  vec3 hit = stageP + R * travel;
+                  float width = 0.0015 + roughnessFactor * roughnessFactor * 0.6 + travel * 0.0015;
+                  float lit = uSegment.y > 1.5 ? step(fract((hit.z - uSegment.x) / uSegment.y), uSegment.z) : 1.0;
+                  float streak = 0.0;
+                  for (int i = 0; i < 4; i++) { float dx = hit.x - stageRow(i); streak += exp(-dx * dx / width); }
+                  float fresnel = 0.04 + 0.96 * pow(1.0 - max(dot(Nw, Vw), 0.0), 5.0);
+                  reflectedLight.indirectSpecular += uLightColor * streak * lit * fresnel * uGloss * 3.0 / (1.0 + travel * 0.04);
+                }
+              }
+            }
+            #include <aomap_fragment>`);
+      };
+      material.customProgramCacheKey = () => `stage-photoreal-${stage}`;
     }
 
     // A plane whose UVs follow the same physical-size convention as boxes.
@@ -117,14 +206,14 @@
       const length = STATION_NEAR - STATION_FAR, midZ = (STATION_NEAR + STATION_FAR) / 2;
       const floorY = -2.2, bedY = -3.45, ceilingY = 3.6, platformHalf = 4.2, trackX = 6.25, wallX = 8.55;
 
-      const floor = this.material(s, { map: "floorMap", normal: "floorNormal", size: 1.6, roughness: 0.34, normalScale: 0.8, color: 0x7d8286, envMapIntensity: 0.7 });
+      const floor = this.material(s, { map: "floorMap", normal: "floorNormal", size: 3.2, roughness: 0.2, normalScale: 0.5, color: 0x7a7f83, envMapIntensity: 0.55, photo: { gloss: 1, grime: 0, macro: 0.9 } });
       const tactile = this.material(s, { map: "tactileMap", normal: "tactileNormal", size: 0.4, roughness: 0.55 });
       const edgeWhite = this.material(s, { color: 0xbfc3c0, roughness: 0.5 });
-      const concrete = this.material(s, { map: "concreteMap", normal: "concreteDetailNormal", size: 3.2, roughness: 0.85, normalScale: 0.7, color: 0x9a9c9e });
+      const concrete = this.material(s, { map: "concreteMap", normal: "concreteNormal", size: 3.2, roughness: 0.78, normalScale: 0.35, color: 0x8f9193 });
       const darkConcrete = this.material(s, { map: "concreteMap", normal: "concreteNormal", size: 3.2, roughness: 0.9, color: 0x6a6d70 });
       const ballast = this.material(s, { map: "ballastMap", normal: "ballastNormal", size: 1.4, roughness: 0.95 });
-      const wallTile = this.material(s, { map: "wallTileMap", normal: "wallTileNormal", size: 2.6, roughness: 0.3, color: 0x6c6a66, envMapIntensity: 0.6 });
-      const ceiling = this.material(s, { map: "ceilingMap", normal: "ceilingNormal", size: 0.8, roughness: 0.55, metalness: 0.6 });
+      const wallTile = this.material(s, { map: "wallTileMap", normal: "wallTileNormal", size: 4.8, roughness: 0.28, color: 0x74716c, envMapIntensity: 0.5, photo: { grime: 0.9, macro: 0.7 } });
+      const ceiling = this.material(s, { map: "ceilingMap", normal: "ceilingNormal", size: 0.8, roughness: 0.55, metalness: 0.6, photo: { grime: 0, macro: 0.4 } });
       const steel = this.material(s, { color: 0x8c979e, roughness: 0.32, metalness: 0.85, normal: "metalPanelNormal", size: 1, normalScale: 0.4 });
       const darkSteel = this.material(s, { color: 0x2a3036, roughness: 0.45, metalness: 0.7 });
       const rail = this.material(s, { color: 0xb8c0c4, roughness: 0.22, metalness: 1 });
@@ -266,10 +355,10 @@
     dressLounge(group) {
       const T = this.T, s = "lounge", box = (w, h, d) => this.world.surfaces.box(w, h, d);
       const floorY = -3.89;
-      const wood = this.material(s, { map: "woodMap", normal: "woodNormal", size: 2.4, roughness: 0.38, color: 0x7a5a44, envMapIntensity: 0.55 });
+      const wood = this.material(s, { map: "woodMap", normal: "woodNormal", size: 2.4, roughness: 0.3, color: 0x6e5240, envMapIntensity: 0.5, photo: { gloss: 0.7, grime: 0, macro: 0.8 } });
       const velvet = this.material(s, { map: "velvetMap", size: 0.8, roughness: 0.9, envMapIntensity: 0.4 });
       const brass = this.material(s, { color: 0xc89b54, roughness: 0.25, metalness: 1 });
-      const marble = this.material(s, { color: 0x1a1d20, roughness: 0.15, metalness: 0.1, envMapIntensity: 1.4 });
+      const marble = this.material(s, { color: 0x1a1d20, roughness: 0.15, metalness: 0.1, envMapIntensity: 1.4, photo: { gloss: 0.8, grime: 0, macro: 0.3 } });
       const glow = this.owner.trackMaterial(new T.MeshBasicMaterial({ color: 0xffd9a0 }));
       const bottleColors = [0x2e7d32, 0x8d5524, 0xb71c1c, 0x90caf9, 0xf5f5f5].map(color => this.material(s, { color, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.8 }));
       const floor = new T.Mesh(this.plane(13, 60), wood);
@@ -310,7 +399,10 @@
     }
 
     update(travel) {
-      if (this.station) this.station.position.z = ((travel % STATION_PERIOD) + STATION_PERIOD) % STATION_PERIOD;
+      if (this.station) {
+        this.station.position.z = ((travel % STATION_PERIOD) + STATION_PERIOD) % STATION_PERIOD;
+        this.rigs.station.uStageOffset.value.copy(this.station.position);
+      }
     }
   }
 

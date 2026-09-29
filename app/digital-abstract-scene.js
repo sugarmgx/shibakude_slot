@@ -1104,6 +1104,8 @@
               if (uWipeType > 2.5) previous *= 1.0 + p * 1.2;
               color = mix(previous, color, reveal) + vec3(1.0, 0.95, 0.88) * edge * 0.6;
             }
+            // Photographic grain: a faint per-frame sensor noise.
+            color += (hash12(vUv * uResolution + fract(uTime * 7.13) * 91.0) - 0.5) * 0.018;
             gl_FragColor = vec4(shoulder(color), 1.0);
           }
         `,

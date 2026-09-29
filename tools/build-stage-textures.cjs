@@ -73,22 +73,24 @@ function pmndrs() {
     const jpg = (c, q = 0.84) => c.toDataURL('image/jpeg', q);
     const out = {};
 
-    // Station floor: 4x4 terrazzo tiles, grout, traffic wear.
+    // Station floor: large polished terrazzo slabs (2 x 2 per texture), fine
+    // aggregate, hairline joints and soft traffic wear. Low contrast on purpose:
+    // the shader adds light, reflections and grime.
     {
-      const S = 1024, T = 256;
-      const grout = (x, y) => Math.min(x % T, y % T, T - 1 - (x % T), T - 1 - (y % T));
-      const tileTone = [...Array(16)].map(() => 0.92 + rand() * 0.14);
-      const speck = new Uint8Array(S * S); for (let i = 0; i < 26000; i++) speck[Math.floor(rand() * S * S)] = 1 + Math.floor(rand() * 3);
+      const S = 1024, T = 512;
+      const joint = (x, y) => Math.min(x % T, y % T, T - 1 - (x % T), T - 1 - (y % T));
+      const slabTone = [...Array(4)].map(() => 0.97 + rand() * 0.06);
+      const speck = new Uint8Array(S * S); for (let i = 0; i < 60000; i++) speck[Math.floor(rand() * S * S)] = 1 + Math.floor(rand() * 3);
       const albedo = pixels(S, S, (x, y) => {
-        const g = grout(x, y), tone = tileTone[Math.floor(y / T) * 4 + Math.floor(x / T)];
-        const wear = 0.9 + fbm(x / 128, y / 128, 8) * 0.18;
-        let v = 150 * tone * wear;
-        const s = speck[y * S + x]; if (s === 1) v *= 0.55; else if (s === 2) v *= 1.25; else if (s === 3) v *= 0.8;
-        if (g < 3) v = 92;
-        return [v * 0.98, v, v * 1.02];
+        const tone = slabTone[Math.floor(y / T) * 2 + Math.floor(x / T)];
+        const wear = 0.95 + (fbm(x / 170, y / 170, 6) - 0.5) * 0.12;
+        let v = 132 * tone * wear;
+        const s = speck[y * S + x]; if (s === 1) v *= 0.8; else if (s === 2) v *= 1.1; else if (s === 3) v *= 0.9;
+        if (joint(x, y) < 1) v *= 0.72;
+        return [v * 0.985, v, v * 1.015];
       });
-      const height = pixels(S, S, (x, y) => { const v = grout(x, y) < 3 ? 0 : 255; return [v, v, v]; });
-      out.floorMap = jpg(albedo); out.floorNormal = jpg(normalFrom(height, 2.2), 0.9);
+      const height = pixels(S, S, (x, y) => { const v = joint(x, y) < 1 ? 60 : 255; return [v, v, v]; });
+      out.floorMap = jpg(albedo, 0.9); out.floorNormal = jpg(normalFrom(height, 0.8), 0.9);
     }
     // Tactile paving: yellow with raised dots.
     {
@@ -98,29 +100,30 @@ function pmndrs() {
       const height = pixels(S, S, (x, y) => { const v = dome(x, y) * 255; return [v, v, v]; });
       out.tactileMap = jpg(albedo); out.tactileNormal = jpg(normalFrom(height, 3), 0.9);
     }
-    // Concrete: board-formed with water streaks.
+    // Concrete: smooth fair-faced finish, faint formwork seam, soft blotches.
     {
       const S = 512;
       const albedo = pixels(S, S, (x, y) => {
-        let v = 150 + (fbm(x / 64, y / 64, 8) - 0.5) * 50 + (rand() - 0.5) * 10;
-        v -= Math.max(0, fbm(x / 10, y / 180, 51, 3) - 0.55) * 110;
-        if (y % 128 < 2) v -= 26;
-        return [v, v * 0.995, v * 0.97];
+        let v = 138 + (fbm(x / 90, y / 90, 6) - 0.5) * 22 + (rand() - 0.5) * 4;
+        v -= Math.max(0, fbm(x / 14, y / 220, 37, 3) - 0.6) * 40;
+        if (y % 256 < 1) v -= 10;
+        return [v, v * 0.995, v * 0.975];
       });
-      const height = pixels(S, S, (x, y) => { const v = fbm(x / 16, y / 16, 32) * 255 - (y % 128 < 2 ? 80 : 0); return [v, v, v]; });
-      out.concreteMap = jpg(albedo); out.concreteNormal = jpg(normalFrom(height, 1.2), 0.9);
+      const height = pixels(S, S, (x, y) => { const v = 128 + (fbm(x / 22, y / 22, 23) - 0.5) * 60; return [v, v, v]; });
+      out.concreteMap = jpg(albedo, 0.9); out.concreteNormal = jpg(normalFrom(height, 0.5), 0.9);
     }
-    // Wall tiles: cream glazed, 4 x 8.
+    // Wall cladding: enamelled steel panels (2 x 1 per texture), hairline
+    // seams, a very slight tone drift between panels.
     {
-      const S = 512, TW = 128, TH = 64;
+      const S = 512, PW = 256, PH = 512;
+      const tones = [...Array(2)].map(() => 0.98 + rand() * 0.04);
       const albedo = pixels(S, S, (x, y) => {
-        const edge = Math.min(x % TW, y % TH, TW - 1 - (x % TW), TH - 1 - (y % TH));
-        const tone = 0.95 + noise(Math.floor(x / TW) * 3.1, Math.floor(y / TH) * 2.3, 64) * 0.1;
-        const v = edge < 2 ? 120 : 214 * tone * (0.97 + fbm(x / 64, y / 64, 8) * 0.06);
-        return [v, v * 0.975, v * 0.93];
+        const seam = Math.min(x % PW, PW - 1 - (x % PW), y, S - 1 - y);
+        const v = (seam < 1 ? 150 : 196) * tones[Math.floor(x / PW)] * (0.985 + fbm(x / 120, y / 120, 4) * 0.03);
+        return [v, v * 0.985, v * 0.955];
       });
-      const height = pixels(S, S, (x, y) => { const e = Math.min(x % TW, y % TH, TW - 1 - (x % TW), TH - 1 - (y % TH)); const v = Math.min(1, e / 4) * 255; return [v, v, v]; });
-      out.wallTileMap = jpg(albedo); out.wallTileNormal = jpg(normalFrom(height, 1.6), 0.9);
+      const height = pixels(S, S, (x, y) => { const e = Math.min(x % PW, PW - 1 - (x % PW), y, S - 1 - y); const v = Math.min(1, e / 3) * 255; return [v, v, v]; });
+      out.wallTileMap = jpg(albedo, 0.9); out.wallTileNormal = jpg(normalFrom(height, 0.9), 0.9);
     }
     // Ballast: packed gravel.
     {
