@@ -114,6 +114,7 @@
       this.scratch = new T.Color();
       this.travel = 0;
       this.surge = 0;
+      this.crowdHype = 0;
       this.spark = 0;
       this.flickerValue = 1;
       this.flickerUntil = 0;
@@ -544,6 +545,7 @@
 
       const kick = music.kick * music.active, level = music.level * music.active;
       this.surge = Math.max(0, this.surge - dt * 1.6);
+      this.crowdHype = Math.max(0, this.crowdHype - dt * 0.45);
       this.spark = Math.max(0, this.spark - dt * 1.8);
       this.travel += dt * (this.state.speed * (1 + kick * 0.6 + level * 0.3) + this.surge * 9 + (owner.rushAmount || 0) * 42);
 
@@ -616,8 +618,10 @@
         if (!mesh.visible) return;
         const u = mesh.material.uniforms, rowDepth = row ? 6 : 4;
         u.uHalf.value.set(tanHalf * rowDepth * aspect * 1.05, tanHalf * rowDepth);
-        u.uOpacity.value = crowd * (row ? 0.7 : 0.95);
-        u.uBob.value = Math.sin(time * (row ? 5.2 : 6.1)) * 0.3 * (0.3 + kick) + kick * (row ? 0.6 : 1);
+        // Notice hype: the hall crowd bounces harder and higher.
+        const hype = this.crowdHype;
+        u.uOpacity.value = crowd * (row ? 0.7 : 0.95) * (1 + hype * 0.25);
+        u.uBob.value = Math.sin(time * (row ? 5.2 : 6.1) * (1 + hype * 0.8)) * 0.3 * (0.3 + kick + hype * 2.2) + kick * (row ? 0.6 : 1) + hype * (row ? 1.6 : 2.4);
         u.uShift.value = Math.sin(time * 0.05) * 0.02;
         u.uRim.value.copy(this.state.beamColor);
       });

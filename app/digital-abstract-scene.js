@@ -1193,6 +1193,16 @@
       }
     }
 
+    // Hall notice: the crowd jumps (0..1).
+    crowdSurge(amount = 1) {
+      if (this.atmosphere) this.atmosphere.crowdHype = Math.max(this.atmosphere.crowdHype || 0, amount);
+    }
+
+    // Lounge notice: the floor gives way (0..1); the camera drops and shakes.
+    floorSink(depth = 0.5) {
+      this.sinkFx = { at: performance.now(), depth: Math.max(this.sinkFx?.live ? this.sinkFx.depth : 0, depth), live: true };
+    }
+
     rush({ duration = 0.8, strength = 1, returns = true } = {}) {
       this.rushFx = { at: performance.now(), duration, strength, returns };
     }
@@ -1262,6 +1272,20 @@
           // accelerating down the stage until the cut.
           camera.position.z -= rush.returns ? rushAmount * 4.5 : rush.strength * 22 * t * t;
           fov += rushAmount * 24;
+        }
+      }
+      const sink = this.sinkFx;
+      if (sink) {
+        const t = (now - sink.at) / 1000;
+        if (t > 3) this.sinkFx = null;
+        else {
+          const drop = sink.depth * Math.min(1, t * 6) * (t < 2 ? 1 : 1 - (t - 2));
+          const shake = Math.exp(-t * 3.5) * sink.depth;
+          sink.live = t < 2;
+          camera.position.y -= drop * 1.1;
+          camera.position.x += Math.sin(t * 57) * shake * 0.12;
+          camera.rotation.z += Math.sin(t * 41) * shake * 0.02;
+          fov += drop * 6;
         }
       }
       const arrive = this.arriveFx;

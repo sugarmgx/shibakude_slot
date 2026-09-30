@@ -34,6 +34,11 @@
     premiumHit: {},
     reverseFreeze: {},
     allRotation: {},
+    salesTick: { gain: 0.7 },
+    salesRegister: {},
+    floorChime: {},
+    floorCreak: {},
+    floorThud: {},
   };
 
   const files = new Map();   // name -> HTMLAudioElement (only when the file loaded)
@@ -288,6 +293,37 @@
       }
       hiss(ctx, out, { t, dur: 3.2, peak: 0.12, attack: 3, type: "highpass", freq: 6000 });
       return 3.3;
+    },
+    salesTick(ctx, out, t) {
+      hiss(ctx, out, { t, dur: 0.015, peak: 0.3, type: "bandpass", freq: 2600, q: 5 });
+      return 0.04;
+    },
+    salesRegister(ctx, out, t, o) {
+      // "Cha-ching": a bell pair, brighter and fuller the hotter the count.
+      const level = Math.max(0, Math.min(6, o.level || 0));
+      tone(ctx, out, { type: "triangle", f0: midi(88 + level), t, dur: 0.25, peak: 0.18 });
+      tone(ctx, out, { type: "triangle", f0: midi(95 + level), t: t + 0.08, dur: 0.6, peak: 0.16 + level * 0.02 });
+      hiss(ctx, out, { t, dur: 0.08, peak: 0.2, type: "highpass", freq: 5000 });
+      if (level >= 4) tone(ctx, out, { f0: 70, f1: 40, t, dur: 0.3, peak: 0.5 });
+      return 0.8;
+    },
+    floorChime(ctx, out, t) {
+      // Public-address chime: four descending notes.
+      [79, 76, 72, 67].forEach((n, i) => tone(ctx, out, { f0: midi(n), t: t + i * 0.22, dur: 0.5, peak: 0.16 }));
+      return 1.3;
+    },
+    floorCreak(ctx, out, t, o) {
+      const level = Math.max(0, Math.min(6, o.level || 0));
+      const o1 = tone(ctx, out, { type: "sawtooth", f0: 120 + level * 8, f1: 70, t, dur: 0.5 + level * 0.08, peak: 0.08 + level * 0.02, attack: 0.05 });
+      o1.detune.linearRampToValueAtTime(-300, t + 0.4);
+      hiss(ctx, out, { t, dur: 0.5, peak: 0.08, type: "bandpass", freq: 600, q: 6 });
+      return 0.7;
+    },
+    floorThud(ctx, out, t, o) {
+      const level = Math.max(0, Math.min(6, o.level || 0));
+      tone(ctx, out, { f0: 60, f1: 28, t, dur: 0.5 + level * 0.1, peak: 0.6 + level * 0.07 });
+      hiss(ctx, out, { t, dur: 0.4 + level * 0.1, peak: 0.25, type: "lowpass", freq: 900, freq1: 200 });
+      return 0.9;
     },
     premiumHit(ctx, out, t) {
       [72, 76, 79, 84, 88].forEach((n, i) => tone(ctx, out, { type: "triangle", f0: midi(n), t: t + i * 0.06, dur: 1.2, peak: 0.12 }));

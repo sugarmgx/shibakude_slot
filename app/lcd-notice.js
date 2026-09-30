@@ -11,6 +11,10 @@
   const GOLD = 5;
   // Station departure board: service types, in the same ladder.
   const BOARD_TYPES = ["普通", "快速", "区間急行", "急行", "特急", "臨時", "臨時"];
+  // Doujin music fair: the booth's hand-written CD sales POP, same ladder.
+  const SALES = ["0枚", "10枚", "30枚", "100枚", "1000枚", "完売", "増刷決定"];
+  // Club lounge: the floor-condition ticker, same ladder.
+  const FLOOR = ["床の状態：異常なし", "床がきしんでいます", "床が1cm沈んでいます", "床が5cm沈んでいます", "床が10cm沈んでいます", "床が抜けそうです", "床が抜けました"];
 
   // PRIVATE_SPEC: rates / weights for the presentation lottery.
   const OUTCOMES = {
@@ -49,7 +53,8 @@
       }
       return entries[entries.length - 1][0];
     };
-    const isStation = (stage) => stage !== "同人音楽即売会" && stage !== "クラブのラウンジ";
+    const venueOf = (stage) => (stage === "同人音楽即売会" ? "hall" : stage === "クラブのラウンジ" ? "lounge" : "station");
+    const isStation = (stage) => venueOf(stage) === "station";
     const colorOf = (tier) => TIER_COLORS[tier];
     const trainGrade = (tier) => (tier >= GOLD ? "gold" : tier >= 3 ? "express" : "normal");
     const tierSound = (tier) => (tier >= RAINBOW ? "noticePremium" : tier >= 4 ? "noticeHot" : "noticeStep");
@@ -113,6 +118,79 @@
       }
       fx("stationBoard");
     }
+    // Hall: the count rolls, then lands on the tier's figure.
+    function salesPop(tier, roll = true) {
+      let node = layer.querySelector(".notice-sales");
+      if (!node) {
+        node = document.createElement("div");
+        node.className = "notice-sales";
+        node.innerHTML = "<small>新譜CD</small><strong>0枚</strong><em>頒布数</em>";
+        layer.append(node);
+      }
+      layer.hidden = false;
+      setColor(node, tier);
+      const figure = node.querySelector("strong");
+      const id = serial;
+      const land = () => {
+        if (id !== serial) return;
+        figure.textContent = SALES[tier];
+        node.classList.toggle("is-hot", tier >= 4);
+        node.classList.remove("is-land");
+        void node.offsetWidth;
+        node.classList.add("is-land");
+        fx("salesRegister", { level: tier });
+      };
+      if (!roll || env.reduced()) return land();
+      node.classList.add("is-rolling");
+      const ticks = 8 + tier * 2;
+      for (let i = 0; i < ticks; i += 1) {
+        schedule(() => {
+          if (id !== serial) return;
+          figure.textContent = `${Math.floor(random() * (tier >= 4 ? 9999 : 120))}枚`;
+          fx("salesTick");
+        }, i * 45);
+      }
+      schedule(() => { node.classList.remove("is-rolling"); land(); }, ticks * 45);
+    }
+    // Lounge: the LED ticker announces the floor; the floor sinks with it.
+    function floorTicker(tier) {
+      let node = layer.querySelector(".notice-floor");
+      if (!node) {
+        node = document.createElement("div");
+        node.className = "notice-floor";
+        node.innerHTML = "<span></span>";
+        layer.append(node);
+      }
+      layer.hidden = false;
+      setColor(node, tier);
+      const text = node.querySelector("span");
+      text.textContent = FLOOR[tier];
+      node.classList.remove("is-new");
+      void node.offsetWidth;
+      node.classList.add("is-new");
+      fx("floorChime");
+    }
+    function floorQuake(tier) {
+      if (tier <= 0) return;
+      fx(tier >= 3 ? "floorThud" : "floorCreak", { level: tier });
+      scene()?.floorSink?.(Math.min(1, tier / 5));
+      const node = panel();
+      node?.style.setProperty("--quake", String(Math.min(1, tier / 5)));
+      node?.classList.remove("notice-quake");
+      void node?.offsetWidth;
+      node?.classList.add("notice-quake");
+      schedule(() => node?.classList.remove("notice-quake"), 900);
+    }
+    function crowd(tier) {
+      scene()?.crowdSurge?.(0.25 + tier * 0.12);
+    }
+    // One "board" per venue.
+    function venueBoard(venue, tier, flip) {
+      if (venue === "hall") salesPop(tier);
+      else if (venue === "lounge") floorTicker(tier);
+      else board(tier, flip);
+    }
+
     function alarm(tier) {
       for (const side of ["left", "right"]) {
         const node = document.createElement("i");
@@ -131,7 +209,7 @@
       active = null;
       layer.replaceChildren();
       layer.hidden = true;
-      panel()?.classList.remove("notice-blackout", "notice-release", "notice-flicker", "notice-premium");
+      panel()?.classList.remove("notice-blackout", "notice-release", "notice-flicker", "notice-premium", "notice-quake");
       machineWindow()?.classList.remove("notice-lamps", "notice-premium");
       const button = pushButton();
       if (button?.classList.contains("is-notice")) {
@@ -161,12 +239,12 @@
       if (cue.win && random() < PREMIUM_RATE_ON_WIN) return premium(stage);
       const outcome = OUTCOMES[key];
       if (random() >= outcome.rate) return;
-      const station = isStation(stage);
-      let kind = pick(outcome.kinds);
-      if (kind === "board" && !station) kind = "step";
+      const venue = venueOf(stage);
+      const station = venue === "station";
+      const kind = pick(outcome.kinds);
       const tier = Number(pick(outcome.tiers));
       const id = serial;
-      active = { id, kind, tier, stage, station, path: ladder(tier), revealed: false };
+      active = { id, kind, tier, stage, venue, station, path: ladder(tier), revealed: false };
 
       if (kind === "train") {
         train(tier);
@@ -180,7 +258,7 @@
         return;
       }
       if (kind === "board") {
-        board(active.path[0], true);
+        venueBoard(venue, active.path[0], true);
         return;
       }
       if (kind === "push") {
@@ -202,13 +280,30 @@
       if (!notice || notice.id !== serial) return;
       const tier = notice.path[order];
       if (notice.kind === "step") {
-        if (notice.station && order === 1) board(tier, true);
-        if (notice.station && order === 2) alarm(tier);
-        if (order === 3 && notice.station) train(tier);
+        // Station: flicker -> departure board -> alarm lamps -> train.
+        // Hall: sales POP -> crowd jumps -> final count.
+        // Lounge: floor ticker -> floor shakes -> final announcement.
+        if (order === 1) venueBoard(notice.venue, tier, true);
+        if (order === 2) {
+          if (notice.station) alarm(tier);
+          else if (notice.venue === "hall") crowd(tier);
+          else floorQuake(Math.min(tier, 2));
+        }
+        if (order === 3) {
+          if (notice.station) train(tier);
+          else if (notice.venue === "hall") { salesPop(tier, tier !== notice.path[2]); crowd(tier); }
+          else { if (tier !== notice.path[2]) floorTicker(tier); floorQuake(tier); }
+        }
         if (tier !== notice.path[order - 1] || order === 3) step(tier);
       } else if (notice.kind === "board") {
-        if (tier !== notice.path[order - 1]) board(tier, true);
-        if (order === 3) { train(tier); lamps(tier); if (tier >= 4) fx(tierSound(tier), { level: tier }); }
+        if (tier !== notice.path[order - 1]) venueBoard(notice.venue, tier, true);
+        if (order === 3) {
+          if (notice.station) train(tier);
+          else if (notice.venue === "hall") crowd(tier);
+          else floorQuake(tier);
+          lamps(tier);
+          if (tier >= 4) fx(tierSound(tier), { level: tier });
+        }
       } else if (notice.kind === "push" && order === 3 && !notice.revealed) {
         reveal();
       } else if (notice.kind === "blackout" && order === 3) {
@@ -244,7 +339,10 @@
       panel()?.classList.add("notice-premium");
       machineWindow()?.classList.add("notice-premium");
       fx("premiumHit");
-      if (isStation(stage)) train(RAINBOW);
+      const venue = venueOf(stage);
+      if (venue === "station") train(RAINBOW);
+      else if (venue === "hall") { salesPop(RAINBOW, false); crowd(RAINBOW); }
+      else { floorTicker(RAINBOW); floorQuake(RAINBOW); }
       scene()?.impact?.({ strength: 1, hold: 0.08, color: 0xffffff, rays: 1.2, disturb: false });
       schedule(() => {
         if (id !== serial) return;
