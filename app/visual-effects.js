@@ -59,8 +59,16 @@
     api.latestState = null;
     api.burst = 0;
     api.battleHeld = false;
+    notices?.clear();
+    lcdCoins?.clear();
+    muffled = null;
+    window.ShibakuAudioDuck?.(1, 0);
+    document.querySelector("#lcdScreen .lcd-milestone")?.remove();
+    document.querySelector(".machine-panel")?.classList.remove("muffled", "hit-shake");
     api.battleEnd?.();
-    document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow");
+    document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow", "cz-final", "last-lamp");
+    document.querySelector(".machine-panel")?.classList.remove("silence-beat", "reel-freeze");
+    document.querySelector(".machine-window")?.classList.remove("reel-flash-blackout", "reel-flash-one", "reel-flash-blink", "reel-flash-fanfare", "lamp-fanfare");
     document.querySelector(".machine-window")?.classList.remove("bell-payout-flash", "baba-sandwich-clear", "baba-bonus-ready-glow", "bonus-confirmed", "bonus-confirm-red", "bonus-confirm-blue", "bonus-confirm-reg", "long-freeze");
     document.querySelector("#effectFlash")?.classList.remove("fire");
   };
@@ -101,12 +109,27 @@
     api.abstractScene?.setTheme(abstractTheme(mode), options);
   }
 
+  // 10: the unko stage warms and intensifies game by game toward the last.
+  function unkoTheme(cz) {
+    const progress = cz?.games ? Math.min(1, Math.max(0, 1 - (cz.gamesLeft - 1) / cz.games)) : 0;
+    const mix = (a, b) => {
+      const ch = (shift) => Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * progress);
+      return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+    };
+    return {
+      primaryColor: mix(0x85949b, 0xd08a3a),
+      secondaryColor: mix(0x4d6472, 0x7a3f1a),
+      emissionIntensity: .8 + progress * .55,
+      effectIntensity: .6 + progress * .7,
+    };
+  }
+
   function syncAbstractStateTheme(mode, state) {
     if (state.mode === "cz") {
       const key = state.cz?.key;
       api.abstractScene?.setTheme({
         ...abstractTheme(mode),
-        ...(key === "unko" ? { primaryColor: 0x85949b, secondaryColor: 0x4d6472, emissionIntensity: .8, effectIntensity: .6 }
+        ...(key === "unko" ? unkoTheme(state.cz)
           : key === "shibaku" ? { primaryColor: 0xe04427, secondaryColor: 0x83c4df, effectIntensity: .65 }
           : { primaryColor: 0xffae30, secondaryColor: 0xda3b23, emissionIntensity: 1 + (state.cz?.babaSandwichHits || 0) * .12 }),
       });
@@ -289,7 +312,10 @@
         `lcd-screen mode-${classMode}` +
         `${state.bannerTone ? ` tone-${state.bannerTone}` : ""}` +
         `${state.mode === "tama" ? " is-tama" : ""}` +
-        `${naviVisible ? " bell-navi-active" : ""}`;
+        `${naviVisible ? " bell-navi-active" : ""}` +
+        // Reserve the navi footer for the whole bonus so the title never jumps per game.
+        `${["bonus", "at", "tama"].includes(state.mode) ? " bell-navi-zone" : ""}`;
+      syncRegMovie(screen, state);
 
       screen.dataset.visualMode = mode;
 
@@ -306,6 +332,12 @@
       sessionInfo.hidden = !payoutMode;
       if (payoutMode) {
         if (state.mode === "bonus") {
+          if (sessionInfo.textContent !== copy.subtitle && sessionInfo.textContent) {
+            // 8: the coin figure hops when it changes.
+            sessionInfo.classList.remove("bump");
+            void sessionInfo.offsetWidth;
+            sessionInfo.classList.add("bump");
+          }
           sessionInfo.textContent = copy.subtitle;
           subtitle.textContent = "";
         } else {
@@ -319,6 +351,7 @@
       const showingNormalStage=state.mode==="normal"&&copy.title===(state.stage||"通常ステージ");
       if(showingNormalStage){
         if(api.lastNormalStage&&api.lastNormalStage!==copy.title&&!reducedMotion.matches){
+          api.abstractScene?.stageTravel?.();
           title.classList.remove("stage-enter");
           void title.offsetWidth;
           title.classList.add("stage-enter");
@@ -368,12 +401,43 @@
 
       document.documentElement.dataset.lcdMode = mode;
     }
+  // REG bonus: the LCD shows the looped REG movie (muted; the BGM plays on).
+  let regMovie = null;
+  function syncRegMovie(screen, state) {
+    const on = state.mode === "bonus" && ["REG", "GOLD_REG"].includes(state.bonus?.type);
+    if (on && !regMovie) {
+      regMovie = document.createElement("video");
+      regMovie.className = "lcd-reg-video";
+      regMovie.muted = true;
+      regMovie.loop = true;
+      regMovie.playsInline = true;
+      regMovie.preload = "auto";
+      regMovie.setAttribute("aria-hidden", "true");
+      regMovie.src = "./assets/video/reg-movie.mp4";
+      document.querySelector("#lcdStage")?.after(regMovie);
+      const overlay = document.createElement("div");
+      overlay.className = "lcd-reg-fx";
+      overlay.setAttribute("aria-hidden", "true");
+      regMovie.after(overlay);
+    }
+    if (!regMovie) return;
+    screen.classList.toggle("reg-movie", on);
+    if (on) {
+      regMovie.hidden = false;
+      if (regMovie.paused) regMovie.play()?.catch?.(() => {});
+    } else if (!regMovie.hidden) {
+      regMovie.hidden = true;
+      regMovie.pause();
+    }
+  }
+
   api.update = (state) => {
     if (!state) return;
     if(state.mode!=="normal"||(api.latestState&&api.latestState.stage!==state.stage))normalCue.cancel();
     api.latestState = state;
     if (api.abstractScene) api.abstractScene.scenery = { stage: state.stage, babaHits: state.cz?.babaSandwichHits || 0 };
     if (api.abstractScene) api.abstractScene.battleEnabled = state.mode === "cz" && state.cz?.key === "shibaku";
+    api.abstractScene?.bonusProgress?.(state.mode === "bonus" && state.bonus ? (state.bonus.coins || 0) / Math.max(1, state.bonus.maxCoins || 1) : 0);
     if (api.battleHeld) return;
     if (api.challengeFailureHeld) return;
     if (Date.now() < api.resultUntil) return;
@@ -391,49 +455,205 @@
     if(before.mode!=="normal"||after.mode!=="normal"||api.battleHeld||Date.now()<api.resultUntil||reducedMotion.matches)return;
     normalCue.begin(after.internalRoleKey||after.presentationRoleKey||"miss",cueRandom(),performance.now());
   };
-  api.normalCueStop = (order, displayedRole) => normalCue.stop(order,performance.now(),displayedRole);
+  api.normalCueStop = (order, displayedRole) => {
+    normalCue.stop(order,performance.now(),displayedRole);
+    notices?.stop(order);
+  };
 
-  const glass = document.createElement("div");
-  glass.className = "battle-glass";
-  glass.setAttribute("aria-hidden", "true");
-  for (let index = 0; index < 6; index += 1) {
-    const shard = document.createElement("i");
-    shard.style.setProperty("--shard", index);
-    glass.append(shard);
-  }
-  document.querySelector("#lcdScreen")?.append(glass);
-  api.battleBeat = (beat, role) => {
-    glass.classList.remove("is-broken");
+  const lcdGlass = window.ShibakuLcdGlass ? new window.ShibakuLcdGlass(document.querySelector("#lcdScreen")) : null;
+  const glass = {
+    crack: () => lcdGlass?.crack(),
+    shatter: () => lcdGlass?.shatter(),
+    clear: () => lcdGlass?.clear(),
+  };
+  const fx = (name, options) => window.ShibakuFx?.play(name, options);
+  const pushButton = () => document.querySelector("#battlePushButton");
+  const setScreen = (className, title = "") => {
+    const screen = document.querySelector("#lcdScreen");
+    if (screen) screen.className = className;
+    const kicker = document.querySelector("#lcdKicker");
+    const titleNode = document.querySelector("#lcdTitle");
+    const subtitle = document.querySelector("#lcdSubtitle");
+    if (kicker) kicker.textContent = "";
+    if (titleNode) titleNode.textContent = title;
+    if (subtitle) subtitle.textContent = "";
+    return screen;
+  };
+
+  // PRIVATE_SPEC: presentation-only draws (cueRandom), never the game lottery.
+  // Punch size leans on the held result: large punches mostly while winning.
+  api.battleBeat = (beat, role, hint = {}) => {
+    glass.clear();
     api.abstractScene?.cabinetWorld?.cue(beat, role);
     if (beat >= 2) api.abstractScene?.pulse(beat === 3 ? 1.25 : .6);
+    if (beat === 2 || beat === 3) {
+      const rare = !["miss", "replay", "bell"].includes(role);
+      const large = cueRandom() < (hint.held ? .58 : .12) + (rare ? .22 : 0);
+      fx(large ? "punchLarge" : "punchSmall");
+      // 11: the enemy takes the hit by its size and staggers when it is going badly for it.
+      if (!["miss", "replay"].includes(role)) api.abstractScene?.cabinetWorld?.enemyHit?.(large ? 1 : .45);
+      api.abstractScene?.cabinetWorld?.enemyStagger?.(Boolean(hint.held));
+      if (large) api.abstractScene?.impact?.({ strength: .35, hold: 0, color: 0xffd9a0, rays: .3, disturb: false });
+    }
   };
-  api.battlePush = () => {
+
+  // After the final game: a charge (pushCharge) and then, together with the
+  // decide sound, PUSH. An abnormal PUSH (huge or red) mostly means a win.
+  const PUSH_ABNORMAL_RATE = { won: 0.30, lost: 0.02 };
+  // PRIVATE_SPEC: the kankutsu plate replaces PUSH on 20% of wins only.
+  const PUSH_KANKUTSU_RATE_ON_WIN = 0.20;
+  // Infinite concentric rings flowing outward from the centre, accelerating
+  // for as long as the charge lasts. Returns a stop function.
+  function chargeRings(screen) {
+    if (!screen || reducedMotion.matches) return () => {};
+    const canvas = document.createElement("canvas");
+    canvas.className = "lcd-charge-rings";
+    canvas.setAttribute("aria-hidden", "true");
+    screen.append(canvas);
+    const ctx = canvas.getContext("2d");
+    const rect = screen.getBoundingClientRect();
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    const cx = canvas.width * 0.5, cy = canvas.height * 0.52;
+    const reach = Math.hypot(canvas.width, canvas.height) * 0.55;
+    const spacing = 34 * dpr;
+    const start = performance.now();
+    let last = start, offset = 0, raf = 0;
+    const tick = (now) => {
+      if (!canvas.isConnected) return;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const t = (now - start) / 1000;
+      const speed = 45 * dpr * Math.pow(2.3, t);
+      offset = (offset + speed * dt) % spacing;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const heat = Math.min(1, t / 3.4);
+      for (let r = offset; r < reach; r += spacing) {
+        const edge = 1 - r / reach;
+        ctx.strokeStyle = `rgba(255,${Math.round(225 - heat * 60)},${Math.round(150 - heat * 90)},${(Math.min(1, r / (spacing * 2)) * edge * (0.35 + heat * 0.55)).toFixed(3)})`;
+        ctx.lineWidth = (1.5 + heat * 3) * dpr * (0.6 + edge * 0.6);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); canvas.remove(); };
+  }
+  let stopChargeRings = () => {};
+  const kankutsuPlate = () => document.querySelector("#lcdScreen .lcd-kankutsu");
+  api.battleCharge = ({ won } = {}) => new Promise((resolve) => {
+    const generation = effectGeneration;
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) world.waiting = true;
-    const screen = document.querySelector("#lcdScreen");
-    screen.className = "lcd-screen mode-challenge battle-push";
-    document.querySelector("#lcdKicker").textContent = "";
-    document.querySelector("#lcdTitle").textContent = "PUSH";
-    document.querySelector("#lcdSubtitle").textContent = "";
+    const kankutsu = Boolean(won) && cueRandom() < PUSH_KANKUTSU_RATE_ON_WIN;
+    const abnormal = kankutsu || cueRandom() < (won ? PUSH_ABNORMAL_RATE.won : PUSH_ABNORMAL_RATE.lost);
+    const style = kankutsu ? "kankutsu" : abnormal ? (cueRandom() < 0.5 ? "huge" : "red") : "normal";
+    const screen = setScreen("lcd-screen mode-challenge battle-charge");
+    stopChargeRings();
+    stopChargeRings = chargeRings(screen);
+    pushButton()?.classList.add("is-charging");
+    const charge = fx(abnormal ? "pushChargeHot" : "pushCharge");
+    const started = performance.now();
+    // Gathering beats: short pulses that tighten as the charge builds.
+    const beat = (index) => {
+      if (generation !== effectGeneration || !api.battleHeld) return;
+      const elapsed = performance.now() - started;
+      api.abstractScene?.pulse(.35 + index * .08);
+      if (index < 24) scheduleEffect(() => beat(index + 1), Math.max(70, 260 - elapsed * .06));
+    };
+    beat(0);
+    const minimum = new Promise((done) => window.setTimeout(done, 1600));
+    const ceiling = new Promise((done) => window.setTimeout(done, 5200));
+    Promise.race([Promise.all([charge?.ended || Promise.resolve(), minimum]), ceiling]).then(() => {
+      pushButton()?.classList.remove("is-charging");
+      stopChargeRings();
+      if (generation !== effectGeneration) return resolve(null);
+      // The kankutsu plate always comes with its own success sound.
+      fx(kankutsu ? "pushKankutsu" : abnormal ? "decideButtonHot" : "decideButton");
+      api.battlePush(style);
+      resolve(style);
+    });
+  });
+  api.battlePush = (style = "normal") => {
+    api.battleHeld = true;
+    const world = api.abstractScene?.cabinetWorld;
+    if (world) world.waiting = true;
+    const screen = setScreen(`lcd-screen mode-challenge battle-push${style === "huge" ? " push-huge" : style === "red" ? " push-red" : style === "kankutsu" ? " push-kankutsu" : ""}`, "PUSH");
+    kankutsuPlate()?.remove();
+    if (style === "kankutsu" && screen) {
+      const plate = document.createElement("img");
+      plate.className = "lcd-kankutsu";
+      plate.src = "./assets/images/kankutsu.png";
+      plate.alt = "";
+      screen.append(plate);
+    }
+    pushButton()?.classList.toggle("is-hot", style === "red" || style === "kankutsu");
+    flash(style === "red" ? "warning" : "accent");
+    api.abstractScene?.impact?.({
+      strength: style === "normal" ? .25 : .6,
+      hold: 0,
+      color: style === "red" ? 0xff2a1f : style === "kankutsu" ? 0xffe600 : 0xfff0c0,
+      rays: style === "normal" ? .15 : .7,
+      disturb: false,
+    });
   };
-  api.battleReveal = (won) => {
+
+  // C9: a win that first looks like the loss (the glass cracks), then the
+  // glass shatters and the win breaks through.
+  const REVIVAL_RATE = 0.2;
+  api.battleRevivalRoll = () => !reducedMotion.matches && cueRandom() < REVIVAL_RATE;
+  api.battleRevival = () => new Promise((resolve) => {
+    kankutsuPlate()?.remove();
+    const generation = effectGeneration;
+    api.battleHeld = true;
+    const world = api.abstractScene?.cabinetWorld;
+    if (world) { world.outcome = false; world.beatAt = performance.now(); }
+    setScreen("lcd-screen mode-challenge battle-loss battle-revival");
+    pushButton()?.classList.remove("is-hot");
+    glass.crack();
+    fx("glassBreak");
+    api.abstractScene?.impact?.({ strength: .4, hold: .05, color: 0xbfe6ff, rays: .2, disturb: false });
+    scheduleEffect(() => {
+      glass.shatter();
+      fx("glassBreak2");
+      fx("revival");
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: 1.2, hold: .1, color: 0xffd76a, rays: 1.3 });
+    }, 1150);
+    window.setTimeout(() => resolve(generation === effectGeneration), 1500);
+  });
+  api.battleReveal = (won, options = {}) => {
+    kankutsuPlate()?.remove();
     api.battleHeld = true;
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.outcome = won; world.beatAt = performance.now(); }
-    const screen = document.querySelector("#lcdScreen");
-    screen.className = `lcd-screen mode-challenge ${won ? "battle-win" : "battle-loss"}`;
-    document.querySelector("#lcdTitle").textContent = won ? "WIN" : "";
-    document.querySelector("#lcdSubtitle").textContent = "";
-    if (won) { flash("hit"); api.abstractScene?.pulse(4); }
-    else glass.classList.add("is-broken");
+    setScreen(`lcd-screen mode-challenge ${won ? "battle-win" : "battle-loss"}`, won ? "WIN" : "");
+    pushButton()?.classList.remove("is-hot");
+    if (won) {
+      if (!options.revival) glass.clear();
+      api.hitImpact(1.3);
+      flash("hit");
+      api.abstractScene?.pulse(4);
+      api.abstractScene?.impact?.({ strength: 1, hold: 0.12, color: 0xffc247, rays: 1 });
+    } else {
+      glass.crack();
+      fx("glassBreak");
+      api.abstractScene?.impact?.({ strength: .45, hold: .06, color: 0xbfe6ff, rays: 0, disturb: false });
+    }
   };
   api.battleEnd = (preserveGlass = false) => {
     api.battleHeld = false;
     api.resultUntil = 0;
     const world = api.abstractScene?.cabinetWorld;
     if (world) { world.waiting = false; world.outcome = null; }
-    if (!preserveGlass) glass.classList.remove("is-broken");
+    pushButton()?.classList.remove("is-charging", "is-hot");
+    stopChargeRings();
+    kankutsuPlate()?.remove();
+    if (!preserveGlass) glass.clear();
   };
 
   api.ichikaku = (bonusType) => {
@@ -455,11 +675,296 @@
     }
     api.burst = 2.6;
     api.abstractScene?.pulse(2.4);
+    api.abstractScene?.impact?.({ strength: 0.7, hold: 0.05, color: isBlue ? 0x2f8fff : 0xff3322, rays: 0.6 });
     flash("hit");
     scheduleEffect(() => {
       machineWindow?.classList.remove("ichikaku-red", "ichikaku-blue");
       screen?.classList.remove("ichikaku-signal", "ichikaku-red", "ichikaku-blue");
     }, reducedMotion.matches ? 200 : 1800);
+  };
+
+  // Notices: the look (train / travel, and its grade) is picked from the
+  // already-resolved result with a presentation-only random stream, so the
+  // game lottery is never consumed. Gold appears only with CZ or a win.
+  let noticeSeed = (Date.now() ^ 0x5bd1e995) >>> 0 || 1;
+  const noticeRandom = () => {
+    noticeSeed ^= noticeSeed << 13; noticeSeed >>>= 0;
+    noticeSeed ^= noticeSeed >>> 17;
+    noticeSeed ^= noticeSeed << 5; noticeSeed >>>= 0;
+    return noticeSeed / 4294967296;
+  };
+  const notices = window.ShibakuNoticeDirector?.create({
+    random: noticeRandom,
+    fx: (name, options) => fx(name, options),
+    schedule: scheduleEffect,
+    scene: () => api.abstractScene,
+    reduced: () => reducedMotion.matches,
+    onArmed: () => api.onNoticeArmed?.(),
+  });
+  api.noticeCue = (cue = {}) => {
+    if (!api.abstractScene?.notice) return;
+    notices?.lever(cue, api.latestState?.stage || "");
+  };
+  api.noticePush = () => Boolean(notices?.reveal());
+  api.noticePushArmed = () => Boolean(notices?.pushArmed());
+
+  // CZ entry "発展": rush forward, black hold, the title flies into the
+  // camera, then the CZ scene breaks in. Kept under two seconds.
+  api.czDevelop = (before) => {
+    const ceiling = (before?.currentGames || 0) + 1 >= (window.ShibakuBT?.ceilingGames || Infinity);
+    const screen = document.querySelector("#lcdScreen");
+    const kicker = document.querySelector("#lcdKicker");
+    const title = document.querySelector("#lcdTitle");
+    const subtitle = document.querySelector("#lcdSubtitle");
+    const rushMs = ceiling ? 800 : 650;
+    api.developing = true;
+    const token = holdPresentation(1800);
+    api.abstractScene?.develop?.({ rushMs });
+    if (screen && kicker && title && subtitle) {
+      screen.classList.add("develop-rush");
+      kicker.textContent = "";
+      title.textContent = "";
+      subtitle.textContent = "";
+    }
+    schedulePresentation(token, () => {
+      if (title) title.textContent = "発展";
+      screen?.classList.add("develop-title");
+    }, rushMs);
+    schedulePresentation(token, () => {
+      screen?.classList.remove("develop-rush", "develop-title");
+      if (ceiling && !reducedMotion.matches) { glass.shatter(); fx("glassBreak2"); }
+      api.developing = false;
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, rushMs + 800);
+    scheduleEffect(() => { api.developing = false; }, 2200);
+  };
+
+  // D10: hold the LCD while the drum lands, then show the result.
+  api.btLanding = (result, misses = 0) => {
+    const ms = window.ShibakuBTPresentation?.land?.(result, misses) || 0;
+    if (!ms) return 0;
+    const total = ms + 200;
+    const token = holdPresentation(total);
+    schedulePresentation(token, () => {
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, total);
+    return total;
+  };
+
+  // 1: reel backlight patterns. Win / CZ pick a pattern with the
+  // presentation stream; the fanfare has its own.
+  const REEL_FLASH_MS = { blackout: 1300, one: 1300, blink: 1000, fanfare: 1500 };
+  api.reelFlash = (kind = "win") => {
+    const machineWindow = document.querySelector(".machine-window");
+    if (!machineWindow || reducedMotion.matches) return;
+    const pattern = kind === "fanfare" ? "fanfare" : kind === "cz" ? "blink" : ["blackout", "one", "blink"][Math.floor(cueRandom() * 3)];
+    machineWindow.classList.remove("reel-flash-blackout", "reel-flash-one", "reel-flash-blink", "reel-flash-fanfare");
+    void machineWindow.offsetWidth;
+    machineWindow.classList.add(`reel-flash-${pattern}`);
+    scheduleEffect(() => machineWindow.classList.remove(`reel-flash-${pattern}`), REEL_FLASH_MS[pattern]);
+  };
+
+  // 4: a beat of silence (sound is stopped by the caller); the LCD dims and
+  // is held, then comes back with a flash.
+  api.silenceBeat = (ms = 380) => new Promise((resolve) => {
+    const panel = document.querySelector(".machine-panel");
+    const token = holdPresentation(ms);
+    panel?.classList.add("silence-beat");
+    window.setTimeout(() => {
+      panel?.classList.remove("silence-beat");
+      if (token === presentationToken) {
+        api.resultUntil = 0;
+        if (api.latestState) api.update(api.latestState);
+      }
+      resolve();
+    }, ms);
+  });
+
+  // 2: hit stop - the picture holds for a few frames and the cabinet jolts.
+  api.hitImpact = (strength = 1) => {
+    if (reducedMotion.matches) return;
+    api.abstractScene?.hitStop?.(50 + strength * 50);
+    const panel = document.querySelector(".machine-panel");
+    panel?.style.setProperty("--hit", String(Math.min(1.5, strength)));
+    panel?.classList.remove("hit-shake");
+    void panel?.offsetWidth;
+    panel?.classList.add("hit-shake");
+    scheduleEffect(() => panel?.classList.remove("hit-shake"), 360);
+  };
+  api.stopJolt = (order = 1) => {
+    if (reducedMotion.matches) return;
+    const machineWindow = document.querySelector(".machine-window");
+    machineWindow?.classList.remove("stop-jolt", "stop-jolt-last");
+    void machineWindow?.offsetWidth;
+    machineWindow?.classList.add(order >= 3 ? "stop-jolt-last" : "stop-jolt");
+  };
+  // 3: slow motion on the scene while the sevens slide in.
+  api.slowMotion = (ms = 600) => {
+    if (reducedMotion.matches) return;
+    api.abstractScene?.slowMotion?.(ms, 0.22);
+  };
+
+  // 1: muffled build -> open release. PRIVATE_SPEC rates by resolved result.
+  const MUFFLE_RATE = { win: .6, cz: .5, strong: .15, weak: .05, none: .02 };
+  let muffled = null;
+  api.muffleCue = (cue = {}) => {
+    if (reducedMotion.matches) return;
+    const rate = cue.czFinal ? .7 : MUFFLE_RATE[cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none"];
+    if (cueRandom() >= rate) return;
+    muffled = { pressure: fx("pressure") };
+    window.ShibakuAudioDuck?.(0.3, 1400);
+    document.querySelector(".machine-panel")?.classList.add("muffled");
+  };
+  api.muffleRelease = (open = false, delay = 0) => {
+    const was = muffled;
+    muffled = null;
+    const run = () => {
+      was?.pressure?.stop?.();
+      document.querySelector(".machine-panel")?.classList.remove("muffled");
+      if (open) {
+        window.ShibakuAudioDuck?.(1, 0);
+        if (was) fx("openUp");
+        api.hitImpact(was ? 1.2 : 0.8);
+      } else if (was) {
+        window.ShibakuAudioDuck?.(1, 500);
+      }
+    };
+    if (delay > 0) scheduleEffect(run, delay);
+    else run();
+  };
+
+  // 7: coins burst out on a payout and fly into the coin counter.
+  const lcdCoins = window.ShibakuLcdCoins ? new window.ShibakuLcdCoins(document.querySelector("#lcdScreen")) : null;
+  api.coinShower = (coins = 0) => {
+    if (!lcdCoins || reducedMotion.matches || coins <= 0) return;
+    const count = Math.min(28, 6 + coins * 2);
+    const target = document.querySelector("#lcdSessionInfo:not([hidden])");
+    lcdCoins.shower(count, target, (i) => { if (i % 3 === 0) fx("coin", { level: i }); });
+  };
+
+  // 9: coin milestones during the bonus.
+  api.coinMilestone = (mark) => {
+    const screen = document.querySelector("#lcdScreen");
+    if (!screen) return;
+    screen.querySelector(".lcd-milestone")?.remove();
+    const node = document.createElement("div");
+    node.className = `lcd-milestone tier-${mark >= 500 ? 3 : mark >= 300 ? 2 : 1}`;
+    node.setAttribute("aria-hidden", "true");
+    node.innerHTML = `<strong>${mark}枚</strong><span>突破</span>`;
+    screen.append(node);
+    fx("milestone", { level: mark >= 500 ? 2 : mark >= 300 ? 1 : 0 });
+    flash("hit");
+    api.hitImpact(mark >= 500 ? 1 : 0.6);
+    api.abstractScene?.impact?.({ strength: .6, hold: 0, color: 0xffd23a, rays: mark >= 300 ? 1 : .6, disturb: false });
+    scheduleEffect(() => node.remove(), 1700);
+  };
+
+  // PRIVATE_SPEC: 3 lever silence / 4 third-stop delay rates by resolved result.
+  const LEVER_SILENCE_RATE = { win: .25, cz: .15, strong: .06, weak: .02, none: .006 };
+  const THIRD_STOP_DELAY_RATE = { win: .35, cz: .22, strong: .08, weak: .03, none: .01 };
+  const cueKey = (cue) => cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none";
+  api.leverSilenceRoll = (cue = {}) => cueRandom() < LEVER_SILENCE_RATE[cueKey(cue)];
+  api.thirdStopDelayRoll = (cue = {}) => cueRandom() < THIRD_STOP_DELAY_RATE[cueKey(cue)];
+
+  // 6: all-rotation premium (rarest). Returns how long the line holds (ms).
+  const ALL_ROTATION_RATE_ON_WIN = 0.01;
+  api.allRotationRoll = () => !reducedMotion.matches && cueRandom() < ALL_ROTATION_RATE_ON_WIN;
+  api.allRotation = () => {
+    notices?.clear();
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.add("notice-premium", "all-rotation");
+    document.querySelector(".machine-window")?.classList.add("notice-premium");
+    fx("allRotation");
+    api.abstractScene?.impact?.({ strength: 1, hold: 0, color: 0xffffff, rays: 1.2, disturb: false });
+    scheduleEffect(() => panel?.classList.remove("all-rotation"), 3300);
+    return 1300;
+  };
+
+  // 5: premium reverse freeze. Returns how long the aligned sevens hold (ms).
+  const REVERSE_FREEZE_RATE_ON_WIN = 0.03;
+  api.reverseFreezeRoll = () => !reducedMotion.matches && cueRandom() < REVERSE_FREEZE_RATE_ON_WIN;
+  api.reverseFreeze = () => {
+    notices?.clear();
+    document.querySelector(".machine-panel")?.classList.add("reel-freeze");
+    fx("reverseFreeze");
+    api.abstractScene?.impact?.({ strength: .5, hold: .6, color: 0xffffff, rays: 0, disturb: false });
+    return 1100;
+  };
+  api.reverseFreezeAligned = () => {
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.remove("reel-freeze");
+    panel?.classList.add("notice-premium");
+    document.querySelector(".machine-window")?.classList.add("notice-premium");
+    fx("premiumHit");
+    api.reelFlash("fanfare");
+    api.hitImpact(1.5);
+    flash("hit");
+    api.abstractScene?.impact?.({ strength: 1.2, hold: .05, color: 0xffffff, rays: 1.4 });
+    scheduleEffect(() => {
+      panel?.classList.remove("notice-premium");
+      document.querySelector(".machine-window")?.classList.remove("notice-premium");
+    }, 2600);
+  };
+
+  // 10: the last-game unko win first looks lost (the glass cracks), then
+  // the glass bursts. Returns the hold length (ms).
+  const CZ_REVIVAL_RATE = 0.4;
+  api.czRevivalRoll = () => !reducedMotion.matches && cueRandom() < CZ_REVIVAL_RATE;
+  api.czRevival = () => {
+    const total = 1700;
+    const token = holdPresentation(total);
+    setScreen("lcd-screen mode-challenge battle-loss battle-revival");
+    glass.crack();
+    fx("glassBreak");
+    schedulePresentation(token, () => {
+      glass.shatter();
+      fx("glassBreak2");
+      fx("revival");
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: 1.2, hold: .1, color: 0xffd76a, rays: 1.3 });
+    }, 1150);
+    schedulePresentation(token, () => {
+      api.resultUntil = 0;
+      if (api.latestState) api.update(api.latestState);
+    }, total);
+    return total;
+  };
+
+  // 3 / 8: cabinet lamps (and the REG movie overlay) breathe with the BGM kick.
+  let lampLoop = 0, lastKick = -1;
+  function lampSync() {
+    lampLoop = requestAnimationFrame(lampSync);
+    const state = api.latestState;
+    const on = ["bonus", "at", "tama", "bt"].includes(state?.mode) && !reducedMotion.matches;
+    const machineWindow = document.querySelector(".machine-window");
+    machineWindow?.classList.toggle("lamp-sync", on);
+    const music = api.abstractScene?.music;
+    const kick = on && music ? Math.min(1, (music.kick || 0) * (music.active || 0)) : 0;
+    if (Math.abs(kick - lastKick) < 0.01) return;
+    lastKick = kick;
+    document.documentElement.style.setProperty("--lamp-kick", kick.toFixed(3));
+  }
+  lampLoop = requestAnimationFrame(lampSync);
+
+  // C8: each CZ tightens toward its last game; the last game darkens and shakes.
+  const CZ_BUILD_COLORS = { unko: 0x9fb0bb, baba: 0xffb43b, shibaku: 0xff5a2a };
+  api.czLever = (key, remaining) => {
+    const panel = document.querySelector(".machine-panel");
+    panel?.classList.remove("cz-final");
+    if (reducedMotion.matches || !Number.isFinite(remaining)) return;
+    const color = CZ_BUILD_COLORS[key] || 0xffb43b;
+    if (remaining > 1 && remaining <= 3) {
+      api.abstractScene?.pulse(.5 + (3 - remaining) * .5);
+      api.abstractScene?.impact?.({ strength: .15 + (3 - remaining) * .1, hold: 0, color, rays: 0, disturb: false });
+      fx("noticeStep", { level: 4 - remaining });
+    } else if (remaining === 1) {
+      panel?.classList.add("cz-final");
+      fx("czBuild", { duration: 1.8 });
+      api.abstractScene?.impact?.({ strength: .55, hold: .2, color, rays: .25, disturb: false });
+      api.abstractScene?.pulse(1.6);
+    }
   };
 
   api.bonusConfirmed = (bonusType) => {
@@ -468,8 +973,21 @@
     const className = bonusType === "BLUE_BIG" ? "bonus-confirm-blue" : bonusType === "RED_BIG" ? "bonus-confirm-red" : "bonus-confirm-reg";
     screen?.classList.add("bonus-confirmed", className);
     machineWindow?.classList.add("bonus-confirmed", className);
+    // 9: LCD, lamps and reels go off together on the fanfare.
+    api.reelFlash("fanfare");
+    api.hitImpact(1.2);
+    machineWindow?.classList.remove("lamp-fanfare");
+    void machineWindow?.offsetWidth;
+    machineWindow?.classList.add("lamp-fanfare");
+    scheduleEffect(() => machineWindow?.classList.remove("lamp-fanfare"), 1700);
     api.burst = 3;
     api.abstractScene?.pulse(2.8);
+    api.abstractScene?.impact?.({
+      strength: bonusType === "REG" ? 0.7 : 1.1,
+      hold: 0.07,
+      color: bonusType === "BLUE_BIG" ? 0x2f8fff : bonusType === "RED_BIG" ? 0xff2a1f : 0xffc86a,
+      rays: bonusType === "REG" ? 0.5 : 1.2,
+    });
     flash("hit");
     scheduleEffect(() => {
       screen?.classList.remove("bonus-confirmed", className);
@@ -498,15 +1016,23 @@
     scheduleEffect(() => machineWindow?.classList.remove(className), hitNumber >= 3 ? 1800 : 1200);
   };
 
+  // The third sandwich blackout lifts shortly after the last stop; the LCD is
+  // held until then so the "BONUS確定" title plays its entry in full view.
+  const BABA_BLACKOUT_RELEASE_MS = 320;
   api.babaBonusReady = () => {
-    const token = holdPresentation(900);
+    const token = holdPresentation(BABA_BLACKOUT_RELEASE_MS);
     schedulePresentation(token, () => {
       api.clearBabaThirdHit();
       api.resultUntil = 0;
       if (api.latestState) api.update(api.latestState);
+      // 6: the LCD glass bursts as the light comes back.
+      if (!reducedMotion.matches) { glass.shatter(); fx("glassBreak2"); }
+      api.hitImpact(1.3);
+      flash("hit");
+      api.abstractScene?.impact?.({ strength: .9, hold: .04, color: 0xffd84a, rays: 1 });
       document.querySelector(".machine-window")?.classList.add("baba-bonus-ready-glow");
       scheduleEffect(() => document.querySelector(".machine-window")?.classList.remove("baba-bonus-ready-glow"), 1800);
-    }, 900);
+    }, BABA_BLACKOUT_RELEASE_MS);
   };
 
   api.clearBabaThirdHit = () => {
@@ -526,6 +1052,7 @@
     api.targetIntensity = 1;
     api.burst = 4.2;
     api.abstractScene?.setPresentation("bonus", 1, { duration: 0.22, pulse: 3.5, clearFeedback: true });
+    api.abstractScene?.impact?.({ strength: 1.2, hold: 0.45, color: 0x2f8fff, rays: 1.3 });
     if (screen && kicker && title && subtitle && meter) {
       screen.className = "lcd-screen mode-bonus-blue long-freeze";
       screen.dataset.visualMode = "longFreeze";
@@ -562,14 +1089,26 @@
       screen.className = `lcd-screen bonus-result mode-${isBlue ? "bonus-blue" : isReg ? "bonus-reg" : "bonus-red"}`;
       screen.dataset.visualMode = "result";
       kicker.textContent = "BONUS RESULT";
-      title.textContent = `${coins} 枚`;
       subtitle.textContent = `${isBlue ? "青7 BIG" : isReg ? "REG BONUS" : "赤7 BIG"}　獲得枚数`;
+      // Count up in a handful of ticks, then stamp the final figure.
+      const steps = reducedMotion.matches ? 1 : 9;
+      title.dataset.count = steps === 1 ? "final" : "run";
+      title.textContent = steps === 1 ? `${coins} 枚` : "0 枚";
+      for (let step = 1; step <= steps; step += 1) {
+        const value = Math.round(coins * (step / steps) ** 0.6);
+        schedulePresentation(token, () => {
+          title.dataset.count = step === steps ? "final" : "run";
+          title.textContent = `${value} 枚`;
+        }, 120 + (step - 1) * 110);
+      }
       meter.style.width = "100%";
     }
     document.documentElement.dataset.lcdMode = "result";
     api.burst = 2.2;
     api.abstractScene?.setPresentation("bonus", isBlue ? 1 : isReg ? 2 : 0, { duration: 0.3, pulse: 2 });
     api.abstractScene?.pulse(2);
+    api.abstractScene?.resultPullout?.(durationMs);
+    api.abstractScene?.impact?.({ strength: 0.45, hold: 0, color: isBlue ? 0x2f8fff : isReg ? 0xffc86a : 0xff2a1f, flash: 0.5 });
     flash("hit");
     schedulePresentation(token, () => {
       api.resultUntil = 0;
@@ -692,7 +1231,7 @@
 
   api.clearChallengeFailure = (nextState = null) => {
     api.challengeFailureHeld = false;
-    glass.classList.remove("is-broken");
+    glass.clear();
     if (nextState) {
       api.lcdMode = visualMode(nextState);
       api.hue = api.lcdMode;
@@ -702,11 +1241,17 @@
   };
 
   api.transition = (before, after) => {
+    document.querySelector(".machine-panel")?.classList.remove("cz-final");
     api.update(after);
     const modeChanged = before.mode !== after.mode || before.bonus?.type !== after.bonus?.type;
     const cruisingBell = before.mode === "at" && after.mode === "at" && after.displayRoleKey === "bell";
     const hit = after.bannerTone === "hit" && !cruisingBell;
     api.targetIntensity = after.mode === "at" || after.mode === "tama" ? 0.42 : after.mode === "bonus" || after.mode === "bonusReady" ? 0.82 : after.mode === "cz" ? (after.cz?.key === "unko" ? .32 : .68) : .22;
+    if (before.mode !== "cz" && after.mode === "cz" && !api.developing) {
+      // Reaching the ceiling earns a longer blackout before the release.
+      const ceiling = (before.currentGames || 0) + 1 >= (window.ShibakuBT?.ceilingGames || Infinity);
+      api.abstractScene?.impact?.({ strength: ceiling ? 0.95 : 0.6, hold: ceiling ? 0.6 : 0.22, color: 0xffa24a, rays: ceiling ? 0.9 : 0.3 });
+    }
     if (modeChanged || hit) {
       api.burst = hit ? 1.9 : 1.15;
       api.abstractScene?.pulse(hit ? 2 : 1.15);

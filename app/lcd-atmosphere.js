@@ -1,0 +1,648 @@
+(() => {
+  "use strict";
+
+  // LCD background depth: far flow particles, mid haze / light shafts,
+  // near bokeh. Everything reacts to the BGM that is already audible and to
+  // board events the player just made (lever, stops, bell payout). No game
+  // state is read beyond the presentation kind and the visible stage.
+  const FLOW_COUNT = 12000;
+  const BOKEH_COUNT = 56;
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const seeded = (index, salt = 0) => {
+    const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453;
+    return value - Math.floor(value);
+  };
+
+  class LcdMusicPulse {
+    constructor() {
+      this.cache = new Map();
+      this.kick = 0;
+      this.level = 0;
+      this.active = 0;
+      this.average = 0;
+    }
+
+    curve(track) {
+      if (!this.cache.has(track)) {
+        const data = window.ShibakuBgmPulse?.[track];
+        const decode = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
+        const low = data ? decode(data.low) : null;
+        this.cache.set(track, data ? { rate: data.rate, low, level: decode(data.level), beat: LcdMusicPulse.beatLength(low, data.rate) } : null);
+      }
+      return this.cache.get(track);
+    }
+
+    // Beat length (s) from the autocorrelation of the low-band onset
+    // envelope, searched between 80 and 180 BPM.
+    static beatLength(values, rate) {
+      const n = values.length, env = new Float32Array(n);
+      let average = values[0] || 0;
+      for (let i = 0; i < n; i += 1) { average += (values[i] - average) * 0.05; env[i] = Math.max(0, values[i] - average * 1.05); }
+      const minLag = Math.floor(rate * 60 / 180), maxLag = Math.ceil(rate * 60 / 80), scores = [];
+      let bestLag = minLag;
+      for (let lag = minLag - 1; lag <= maxLag + 1; lag += 1) {
+        let score = 0;
+        for (let i = lag; i < n; i += 1) score += env[i] * env[i - lag];
+        scores[lag] = score;
+        if (lag >= minLag && lag <= maxLag && score > scores[bestLag]) bestLag = lag;
+      }
+      const a = scores[bestLag - 1], b = scores[bestLag], c = scores[bestLag + 1], denom = a - 2 * b + c;
+      const lag = bestLag + (denom ? 0.5 * (a - c) / denom : 0);
+      return lag / rate;
+    }
+
+    static sample(values, rate, time) {
+      const x = Math.max(0, time * rate), index = Math.floor(x), fraction = x - index;
+      const a = values[Math.min(values.length - 1, index)], b = values[Math.min(values.length - 1, index + 1)];
+      return (a + (b - a) * fraction) / 230;
+    }
+
+    update(dt) {
+      let clock = null;
+      try { clock = window.ShibakuMusicClock?.() || null; } catch (_) {}
+      const data = clock && this.curve(clock.track);
+      this.active += ((data ? 1 : 0) - this.active) * Math.min(1, dt * 3);
+      this.beat = data?.beat || 0;
+      this.time = clock?.time || 0;
+      this.onset = 0;
+      if (!data) {
+        this.kick = Math.max(0, this.kick - dt * 6);
+        this.level += (0 - this.level) * Math.min(1, dt * 2);
+        return this;
+      }
+      const low = LcdMusicPulse.sample(data.low, data.rate, clock.time);
+      const level = LcdMusicPulse.sample(data.level, data.rate, clock.time);
+      this.average += (low - this.average) * Math.min(1, dt * 1.3);
+      const onset = clamp((low - this.average * 1.08) * 3.2, 0, 1);
+      this.onset = onset;
+      this.kick = Math.max(onset, this.kick - dt * 5.5);
+      this.level += (level - this.level) * Math.min(1, dt * 10);
+      return this;
+    }
+  }
+
+  // Per-scene light design. Normal stages differ by colour temperature so
+  // each reads at a glance; bonus / boost keep the tunnel travel direction.
+  const PROFILES = {
+    station: { fog: 0.5, fogColor: 0x6b8aa0, beams: 0.5, beamColor: 0xd6ecff, beamSwing: 0.04, beamSlant: 0.16, train: 1, flicker: 1,
+      flowA: 0xbfd8ea, flowB: 0x5d84a8, flow: 0.25, speed: 1.3, swirl: 0, bokeh: 0.5, bokehColor: 0xbfe0ff, contrast: 0.2, tint: [0.97, 1.0, 1.04], ball: 0, crowd: 0 },
+    hall: { fog: 0.7, fogColor: 0x8a5fa8, beams: 1.0, beamColor: 0xff86d8, beamSwing: 0.32, beamSlant: 0.0, train: 0, flicker: 0,
+      flowA: 0xff9ad8, flowB: 0x72d4ff, flow: 0.28, speed: 0.8, swirl: 0, bokeh: 0.7, bokehColor: 0xffb3e6, contrast: 0.16, tint: [1.02, 0.98, 1.04], ball: 0, crowd: 1 },
+    lounge: { fog: 0.5, fogColor: 0x9a6c3e, beams: 0.6, beamColor: 0xffc98a, beamSwing: 0.03, beamSlant: 0.06, train: 0, flicker: 0,
+      flowA: 0xffd59c, flowB: 0xa7703e, flow: 0.2, speed: 0.45, swirl: 0, bokeh: 0.95, bokehColor: 0xffc47a, contrast: 0.14, tint: [1.06, 1.0, 0.92], ball: 1, crowd: 0 },
+    challenge: { fog: 0.5, fogColor: null, beams: 0.3, beamColor: null, beamSwing: 0.08, beamSlant: 0.1, train: 0, flicker: 0,
+      flowA: null, flowB: null, flow: 0.55, speed: 1.8, swirl: 0.15, bokeh: 0.45, bokehColor: null, contrast: 0.14, tint: [1, 1, 1], ball: 0, crowd: 0 },
+    bonus: { fog: 0.3, fogColor: null, beams: 0.18, beamColor: null, beamSwing: 0.1, beamSlant: 0, train: 0, flicker: 0,
+      flowA: null, flowB: 0xffffff, flow: 0.72, speed: 5.5, swirl: 1, bokeh: 0.55, bokehColor: null, contrast: 0.12, tint: [1, 1, 1], ball: 0, crowd: 0 },
+    boost: { fog: 0.3, fogColor: null, beams: 0.14, beamColor: null, beamSwing: 0.06, beamSlant: 0, train: 0, flicker: 0,
+      flowA: null, flowB: null, flow: 0.7, speed: 7.5, swirl: 0.4, bokeh: 0.45, bokehColor: null, contrast: 0.12, tint: [1, 1, 1], ball: 0, crowd: 0 },
+  };
+  const NUMERIC = ["fog", "beams", "beamSwing", "beamSlant", "train", "flicker", "flow", "speed", "swirl", "bokeh", "contrast", "ball", "crowd"];
+
+  class LcdAtmosphere {
+    constructor(owner) {
+      this.owner = owner;
+      this.T = owner.THREE;
+      const T = this.T;
+      this.group = new T.Group();
+      owner.scene.add(this.group);
+      this.state = {
+        fogColor: new T.Color(), beamColor: new T.Color(), flowA: new T.Color(), flowB: new T.Color(), bokehColor: new T.Color(),
+        tint: new T.Vector3(1, 1, 1),
+      };
+      NUMERIC.forEach(key => { this.state[key] = PROFILES.station[key]; });
+      this.scratch = new T.Color();
+      this.travel = 0;
+      this.surge = 0;
+      this.crowdHype = 0;
+      this.spark = 0;
+      this.flickerValue = 1;
+      this.flickerUntil = 0;
+      this.createFlow();
+      this.createHaze();
+      this.createBokeh();
+      this.createTrain();
+      this.createCrowd();
+      for (const key of ["fogColor", "beamColor", "flowA", "flowB", "bokehColor"]) this.state[key].set(PROFILES.station[key]);
+      this.state.tint.set(...PROFILES.station.tint);
+    }
+
+    createFlow() {
+      const T = this.T, owner = this.owner;
+      const seeds = new Float32Array(FLOW_COUNT * 4);
+      for (let index = 0; index < FLOW_COUNT; index += 1) {
+        for (let k = 0; k < 4; k += 1) seeds[index * 4 + k] = seeded(index, 11 + k);
+      }
+      const geometry = owner.track(new T.BufferGeometry());
+      geometry.setAttribute("position", new T.BufferAttribute(new Float32Array(FLOW_COUNT * 3), 3));
+      geometry.setAttribute("aSeed", new T.BufferAttribute(seeds, 4));
+      this.flowMaterial = owner.trackMaterial(new T.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uTravel: { value: 0 }, uSwirl: { value: 0 }, uKick: { value: 0 }, uSpark: { value: 0 },
+          uPixelRatio: { value: 1 }, uCamPos: { value: new T.Vector3() }, uOpacity: { value: 0.5 },
+          uColorA: { value: new T.Color() }, uColorB: { value: new T.Color() },
+        },
+        vertexShader: `
+          attribute vec4 aSeed;
+          uniform float uTime;
+          uniform float uTravel;
+          uniform float uSwirl;
+          uniform float uKick;
+          uniform float uSpark;
+          uniform float uPixelRatio;
+          uniform vec3 uCamPos;
+          varying float vAlpha;
+          varying float vTint;
+          void main() {
+            // Weighted to the outer thirds so the very wide panel is never empty at the sides.
+            float side = aSeed.x < 0.5 ? -1.0 : 1.0;
+            float spread = mix(1.2, 17.0, pow(fract(aSeed.x * 2.0), 0.65));
+            vec3 p = vec3(side * spread, (aSeed.y - 0.5) * 11.0, 0.0);
+            p.z = 6.0 - mod(aSeed.z * 64.0 + uTravel * (0.75 + aSeed.w * 0.5), 64.0);
+            float t = uTime * 0.35;
+            p.x += sin(p.y * 0.42 + t + aSeed.w * 6.283) * 0.9 + sin(p.z * 0.11 - t * 0.7) * 0.6;
+            p.y += cos(p.x * 0.21 - t * 0.8 + aSeed.w * 3.1) * 0.7 + sin(p.z * 0.09 + t) * 0.4;
+            float angle = uSwirl * (p.z * 0.05 + uTime * 0.3);
+            p.xy = mat2(cos(angle), -sin(angle), sin(angle), cos(angle)) * p.xy;
+            p.xy *= mix(1.0, 0.45 + 0.55 * smoothstep(-58.0, 2.0, p.z), uSwirl);
+            p += vec3(uCamPos.x * 0.6, uCamPos.y * 0.6, uCamPos.z);
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            float depth = max(0.4, -mv.z);
+            float size = (0.55 + aSeed.w * 1.1) * (1.0 + uKick * 0.45 + uSpark * 0.8);
+            gl_PointSize = clamp(size * uPixelRatio * 26.0 / depth, 0.6, 11.0);
+            gl_Position = projectionMatrix * mv;
+            vAlpha = smoothstep(0.9, 3.8, depth) * (1.0 - smoothstep(34.0, 60.0, depth)) * (0.3 + 0.7 * aSeed.w);
+            vTint = aSeed.y;
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          uniform float uOpacity;
+          uniform float uKick;
+          uniform float uSpark;
+          uniform vec3 uColorA;
+          uniform vec3 uColorB;
+          varying float vAlpha;
+          varying float vTint;
+          void main() {
+            float radius = length(gl_PointCoord - 0.5);
+            float shape = 1.0 - smoothstep(0.12, 0.5, radius);
+            float core = 1.0 - smoothstep(0.0, 0.14, radius);
+            vec3 color = mix(uColorB, uColorA, step(0.35, vTint)) * (0.7 + core * 0.8);
+            gl_FragColor = vec4(color, shape * vAlpha * uOpacity * (1.0 + uKick * 0.6 + uSpark * 1.2));
+          }
+        `,
+        transparent: true,
+        blending: T.AdditiveBlending,
+        depthWrite: false,
+      }));
+      this.flow = new T.Points(geometry, this.flowMaterial);
+      this.flow.frustumCulled = false;
+      this.flow.renderOrder = 2;
+      this.group.add(this.flow);
+    }
+
+    createHaze() {
+      const T = this.T, owner = this.owner;
+      this.hazeMaterial = owner.trackMaterial(new T.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uHalf: { value: new T.Vector2(1, 1) }, uDepth: { value: 16 }, uAspect: { value: 4 },
+          uFog: { value: 0 }, uFogColor: { value: new T.Color() }, uBeams: { value: 0 }, uBeamColor: { value: new T.Color() },
+          uSwing: { value: 0 }, uSlant: { value: 0 }, uTrain: { value: 0 }, uTrainPos: { value: -9 }, uTrainColor: { value: new T.Color(0xd9f2ff) }, uFlicker: { value: 1 },
+          uKick: { value: 0 }, uLevel: { value: 0 }, uSpark: { value: 0 }, uBall: { value: 0 }, uBallColor: { value: new T.Color(0xffe2b8) },
+        },
+        vertexShader: `
+          uniform vec2 uHalf;
+          uniform float uDepth;
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * vec4(position.xy * uHalf, -uDepth, 1.0);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform float uTime;
+          uniform float uAspect;
+          uniform float uFog;
+          uniform vec3 uFogColor;
+          uniform float uBeams;
+          uniform vec3 uBeamColor;
+          uniform float uSwing;
+          uniform float uSlant;
+          uniform float uTrain;
+          uniform float uTrainPos;
+          uniform vec3 uTrainColor;
+          uniform float uFlicker;
+          uniform float uKick;
+          uniform float uLevel;
+          uniform float uSpark;
+          uniform float uBall;
+          uniform vec3 uBallColor;
+          float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float noise(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+          }
+          float fbm(vec2 p) {
+            float value = 0.0, amplitude = 0.5;
+            for (int i = 0; i < 4; i++) { value += noise(p) * amplitude; p = p * 2.03 + vec2(17.1, 9.2); amplitude *= 0.5; }
+            return value;
+          }
+          void main() {
+            vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
+            float fog = fbm(p * vec2(0.9, 2.4) + vec2(uTime * 0.035, uTime * 0.01));
+            fog = smoothstep(0.32, 0.92, fog) * (0.55 + 0.45 * (1.0 - abs(vUv.y - 0.42) * 1.8));
+            vec3 color = uFogColor * fog * uFog * 0.3;
+            float beams = 0.0;
+            for (int i = 0; i < 5; i++) {
+              float fi = float(i);
+              float origin = (fi - 2.0) * uAspect * 0.2 + sin(uTime * 0.11 + fi * 1.7) * 0.08;
+              float slant = uSlant + sin(uTime * 0.37 + fi * 2.1) * uSwing;
+              vec2 q = p - vec2(origin, 0.62);
+              float along = -q.y;
+              float across = q.x + q.y * slant;
+              float width = 0.025 + along * 0.075;
+              float beam = exp(-across * across / (width * width)) * smoothstep(0.0, 0.25, along) * (1.0 - smoothstep(0.55, 1.15, along));
+              beams += beam * (0.55 + 0.45 * sin(uTime * 0.6 + fi * 2.3)) * (0.75 + fog * 0.5);
+            }
+            color += uBeamColor * beams * uBeams * 0.55;
+            float trainCore = exp(-pow((p.x - uTrainPos) / 0.45, 2.0)) * exp(-pow((vUv.y - 0.36) / 0.07, 2.0));
+            float trainWash = exp(-pow((p.x - uTrainPos) / 1.4, 2.0)) * 0.12;
+            color += uTrainColor * (trainCore * 0.9 + trainWash) * uTrain;
+            if (uBall > 0.01) {
+              // Mirror-ball flecks sweeping the room, denser toward the floor.
+              float spin = uTime * 0.12;
+              vec2 q = mat2(cos(spin), -sin(spin), sin(spin), cos(spin)) * (p + vec2(0.0, 0.9));
+              vec2 cell = floor(q * 8.0);
+              vec2 local = fract(q * 8.0) - 0.5;
+              float on = step(0.62, hash(cell));
+              float fleck = (1.0 - smoothstep(0.02, 0.11, length(local * vec2(1.0, 1.6)))) * on;
+              float floorBias = 0.45 + 0.55 * smoothstep(0.75, 0.15, vUv.y);
+              color += uBallColor * fleck * floorBias * uBall * (0.5 + 0.5 * sin(uTime * 3.0 + hash(cell) * 6.283));
+            }
+            color *= uFlicker * (1.0 + uKick * 0.55 + uLevel * 0.2 + uSpark * 0.4);
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `,
+        transparent: true,
+        blending: T.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+      }));
+      this.haze = new T.Mesh(owner.track(new T.PlaneGeometry(2, 2)), this.hazeMaterial);
+      this.haze.frustumCulled = false;
+      this.haze.renderOrder = 9;
+      this.group.add(this.haze);
+    }
+
+    createBokeh() {
+      const T = this.T, owner = this.owner;
+      const seeds = new Float32Array(BOKEH_COUNT * 4);
+      for (let index = 0; index < BOKEH_COUNT; index += 1) {
+        for (let k = 0; k < 4; k += 1) seeds[index * 4 + k] = seeded(index, 41 + k);
+      }
+      const geometry = owner.track(new T.BufferGeometry());
+      geometry.setAttribute("position", new T.BufferAttribute(new Float32Array(BOKEH_COUNT * 3), 3));
+      geometry.setAttribute("aSeed", new T.BufferAttribute(seeds, 4));
+      this.bokehMaterial = owner.trackMaterial(new T.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uTanHalf: { value: 0.47 }, uAspect: { value: 4 }, uPixelRatio: { value: 1 },
+          uOpacity: { value: 0.5 }, uColor: { value: new T.Color() }, uKick: { value: 0 }, uSpark: { value: 0 }, uHeight: { value: 300 },
+        },
+        vertexShader: `
+          attribute vec4 aSeed;
+          uniform float uTime;
+          uniform float uTanHalf;
+          uniform float uAspect;
+          uniform float uPixelRatio;
+          uniform float uKick;
+          uniform float uSpark;
+          uniform float uHeight;
+          varying float vAlpha;
+          void main() {
+            // View space: the near layer stays framed whatever the camera does.
+            float depth = 1.6 + aSeed.z * 2.8;
+            float x = fract(aSeed.x + uTime * 0.0035 * (0.4 + aSeed.w)) * 2.0 - 1.0;
+            float y = (aSeed.y * 2.0 - 1.0) + sin(uTime * 0.05 + aSeed.w * 6.283) * 0.12;
+            vec3 view = vec3(x * uTanHalf * depth * uAspect * 1.05, y * uTanHalf * depth, -depth);
+            gl_Position = projectionMatrix * vec4(view, 1.0);
+            gl_PointSize = uHeight * uPixelRatio * (0.07 + aSeed.w * 0.2) * (1.0 + uSpark * 0.25);
+            vAlpha = (0.35 + 0.65 * aSeed.z) * smoothstep(1.0, 0.8, abs(x)) * (1.0 + uKick * 0.7 + uSpark * 1.5);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          uniform float uOpacity;
+          uniform vec3 uColor;
+          varying float vAlpha;
+          void main() {
+            float radius = length(gl_PointCoord - 0.5);
+            float disc = 1.0 - smoothstep(0.44, 0.5, radius);
+            float rim = smoothstep(0.3, 0.46, radius) * disc;
+            gl_FragColor = vec4(uColor, (disc * 0.28 + rim * 0.38) * vAlpha * uOpacity * 0.16);
+          }
+        `,
+        transparent: true,
+        blending: T.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+      }));
+      this.bokeh = new T.Points(geometry, this.bokehMaterial);
+      this.bokeh.frustumCulled = false;
+      this.bokeh.renderOrder = 10;
+      this.group.add(this.bokeh);
+    }
+
+    static canvasTexture(T, width, height, draw) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      draw(canvas.getContext("2d"), width, height);
+      const texture = new T.CanvasTexture(canvas);
+      texture.anisotropy = 4;
+      return texture;
+    }
+
+    // Station set piece: a lit commuter train rushing past behind the pillars.
+    // Station set piece: a lit train rushing past behind the pillars. Three
+    // liveries (commuter / express / gold) are the notice grades.
+    createTrain() {
+      const T = this.T, owner = this.owner;
+      const livery = (kind, band = null) => {
+        let seed = 3;
+        const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+        const body = kind === "gold" ? "#3a2606" : "#0b0f14";
+        const windowTop = kind === "gold" ? "#fff2c4" : "#fff8e6";
+        const windowBottom = kind === "gold" ? "#ffc247" : "#d8e6f0";
+        const texture = LcdAtmosphere.canvasTexture(T, 2048, 128, (ctx, w, h) => {
+          ctx.fillStyle = body; ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = kind === "gold" ? "#ffd166" : "#26313a"; ctx.fillRect(0, 12, w, 4); ctx.fillRect(0, h - 22, w, 3);
+          if (band) {
+            // Notice color band (white < blue < yellow < green < red < gold < rainbow).
+            let fill = band;
+            if (band === "gold" || band === "rainbow") {
+              fill = ctx.createLinearGradient(0, 0, w, 0);
+              const stops = band === "gold" ? ["#fff3c4", "#ffb43b", "#fff3c4"] : ["#ff2a4a", "#ff9d1f", "#ffe93a", "#2fe36b", "#1fb8ff", "#8a5cff", "#ff2ad4"];
+              for (let repeat = 0; repeat < 4; repeat += 1) stops.forEach((color, i) => fill.addColorStop(Math.min(1, (repeat + i / stops.length) / 4), color));
+            }
+            ctx.fillStyle = fill; ctx.fillRect(0, 94, w, kind === "normal" ? 8 : 12);
+            if (kind === "express") { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 108, w, 3); }
+          } else if (kind === "express") { ctx.fillStyle = "#e0231b"; ctx.fillRect(0, 94, w, 10); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 106, w, 3); }
+          if (kind === "gold" && !band) { const band = ctx.createLinearGradient(0, 0, w, 0); band.addColorStop(0, "#fff3c4"); band.addColorStop(0.5, "#ffb43b"); band.addColorStop(1, "#fff3c4"); ctx.fillStyle = band; ctx.fillRect(0, 94, w, 12); }
+          for (let car = 0; car < 4; car += 1) {
+            const x0 = car * 512;
+            ctx.fillStyle = "#000"; ctx.fillRect(x0, 0, 6, h);
+            for (let win = 0; win < 7; win += 1) {
+              const x = x0 + 26 + win * 68;
+              const glow = ctx.createLinearGradient(0, 30, 0, 86);
+              glow.addColorStop(0, windowTop); glow.addColorStop(1, windowBottom);
+              ctx.fillStyle = glow; ctx.fillRect(x, 30, 48, 56);
+              ctx.fillStyle = "rgba(10,14,18,0.8)";
+              for (let k = 0; k < 2; k += 1) if (rand() < 0.55) {
+                const px = x + 8 + rand() * 30;
+                ctx.beginPath(); ctx.arc(px, 58, 7, 0, 7); ctx.fill(); ctx.fillRect(px - 10, 64, 20, 22);
+              }
+            }
+          }
+        });
+        texture.wrapS = T.RepeatWrapping;
+        texture.repeat.set(kind === "express" ? 3 : 2, 1);
+        owner.textures.push(texture);
+        return texture;
+      };
+      this.trainLiveries = { normal: livery("normal"), express: livery("express"), gold: livery("gold") };
+      this.trainTierLiveries = ["#e8eef2", "#2f7bff", "#ffd23a", "#2fd36b", "#ff2a1f", "gold", "rainbow"]
+        .map((band, tier) => livery(tier >= 5 ? "gold" : tier >= 3 ? "express" : "normal", band));
+      this.trainMaterial = owner.trackMaterial(new T.MeshBasicMaterial({ map: this.trainLiveries.normal, color: 0xc8d4dc, fog: false, transparent: true }));
+      this.train = new T.Mesh(owner.track(new T.PlaneGeometry(60, 2.6)), this.trainMaterial);
+      this.train.visible = false;
+      this.group.add(this.train);
+      this.trainRun = null;
+      this.clock = 0;
+    }
+
+    // Right side runs far -> near, left side runs near -> far.
+    runTrain(grade = "normal", direction = 1, tier = null) {
+      const duration = grade === "express" ? 0.85 : grade === "gold" ? 1.15 : 1.4;
+      this.trainRun = { start: this.clock + 0.2, duration, grade, direction };
+      this.trainMaterial.map = (tier !== null && this.trainTierLiveries[tier]) || this.trainLiveries[grade] || this.trainLiveries.normal;
+      this.trainMaterial.color.set(grade === "normal" ? 0xc8d4dc : 0xffffff);
+      this.trainMaterial.needsUpdate = true;
+      this.train.scale.x = grade === "express" ? 1.5 : 1;
+      if (grade === "gold") this.spark = 1;
+    }
+
+    // Hall set piece: two rows of audience silhouettes along the bottom edge.
+    createCrowd() {
+      const T = this.T, owner = this.owner;
+      let seed = 11;
+      const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const texture = LcdAtmosphere.canvasTexture(T, 2048, 256, (ctx, w, h) => {
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#fff";
+        for (let x = -20; x < w + 20; x += 34 + rand() * 30) {
+          const head = 20 + rand() * 7, top = 110 + rand() * 40;
+          ctx.beginPath(); ctx.arc(x, top, head, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(x, top + head + 70, head * 2.3, 80, 0, Math.PI, 0); ctx.fill();
+          ctx.fillRect(x - head * 2.3, top + head + 70, head * 4.6, h);
+          if (rand() < 0.22) { ctx.save(); ctx.translate(x + (rand() < 0.5 ? -1 : 1) * head * 1.6, top + head + 20); ctx.rotate((rand() - 0.5) * 0.5); ctx.fillRect(-6, -120, 12, 130); ctx.beginPath(); ctx.arc(0, -122, 9, 0, 7); ctx.fill(); ctx.restore(); }
+        }
+      });
+      owner.textures.push(texture);
+      this.crowdMaterial = owner.trackMaterial(new T.ShaderMaterial({
+        uniforms: { uMap: { value: texture }, uRim: { value: new T.Color() }, uOpacity: { value: 0 }, uBob: { value: 0 }, uShift: { value: 0 },
+          uHalf: { value: new T.Vector2(1, 1) }, uDepth: { value: 4 }, uRow: { value: 0 } },
+        vertexShader: `
+          uniform vec2 uHalf;
+          uniform float uDepth;
+          uniform float uBob;
+          uniform float uRow;
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            vec2 xy = vec2(position.x * uHalf.x, -uHalf.y + (position.y + 1.0) * uHalf.y * 0.26 - uHalf.y * 0.02 + uBob * uHalf.y * 0.02);
+            gl_Position = projectionMatrix * vec4(xy, -uDepth, 1.0);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          uniform sampler2D uMap;
+          uniform vec3 uRim;
+          uniform float uOpacity;
+          uniform float uShift;
+          uniform float uRow;
+          varying vec2 vUv;
+          void main() {
+            vec2 uv = vec2(vUv.x * 1.6 + uShift + uRow * 0.37, vUv.y);
+            float body = texture2D(uMap, uv).a;
+            float above = texture2D(uMap, uv + vec2(0.0, 0.03)).a;
+            float rim = clamp(body - above, 0.0, 1.0);
+            vec3 color = vec3(0.012, 0.012, 0.02) + uRim * rim * 0.9;
+            gl_FragColor = vec4(color, body * uOpacity);
+          }
+        `,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      texture.wrapS = T.RepeatWrapping;
+      this.crowdRows = [0, 1].map(row => {
+        const material = row ? this.crowdMaterial.clone() : this.crowdMaterial;
+        if (row) owner.trackMaterial(material);
+        material.uniforms.uMap.value = texture;
+        material.uniforms.uRow.value = row;
+        material.uniforms.uDepth.value = row ? 6 : 4;
+        const mesh = new T.Mesh(owner.track(new T.PlaneGeometry(2, 2)), material);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = row ? 11 : 12;
+        mesh.visible = false;
+        this.group.add(mesh);
+        return mesh;
+      });
+    }
+
+    // Board events the player just caused. Visible actions only.
+    board(kind) {
+      if (kind === "lever") this.surge = 1;
+      else if (kind === "stop") this.surge = Math.max(this.surge, 0.35);
+      else if (kind === "bell") this.spark = 1;
+    }
+
+    applyProfile(profile, weight) {
+      const theme = this.owner.theme, s = this.accum;
+      const pick = (value, fallback) => (value === null ? fallback : this.scratch.set(value));
+      NUMERIC.forEach(key => { s[key] += profile[key] * weight; });
+      s.fogColor.add(this.scratch.copy(pick(profile.fogColor, theme.primary)).multiplyScalar(weight));
+      s.beamColor.add(this.scratch.copy(pick(profile.beamColor, theme.accent)).multiplyScalar(weight));
+      s.flowA.add(this.scratch.copy(pick(profile.flowA, theme.primary)).multiplyScalar(weight));
+      s.flowB.add(this.scratch.copy(pick(profile.flowB, theme.secondary)).multiplyScalar(weight));
+      s.bokehColor.add(this.scratch.copy(pick(profile.bokehColor, theme.primary)).multiplyScalar(weight));
+      s.tint.x += profile.tint[0] * weight; s.tint.y += profile.tint[1] * weight; s.tint.z += profile.tint[2] * weight;
+    }
+
+    update(dt, time, music) {
+      const T = this.T, owner = this.owner, camera = owner.camera;
+      const weights = owner.presentationWeights;
+      const stage = owner.scenery?.stage;
+      const normal = stage === "同人音楽即売会" ? PROFILES.hall : stage === "クラブのラウンジ" ? PROFILES.lounge : PROFILES.station;
+      if (!this.accum) this.accum = { fogColor: new T.Color(), beamColor: new T.Color(), flowA: new T.Color(), flowB: new T.Color(), bokehColor: new T.Color(), tint: new T.Vector3() };
+      const s = this.accum;
+      NUMERIC.forEach(key => { s[key] = 0; });
+      ["fogColor", "beamColor", "flowA", "flowB", "bokehColor"].forEach(key => s[key].setRGB(0, 0, 0));
+      s.tint.set(0, 0, 0);
+      const total = Math.max(0.0001, weights.normal + weights.challenge + weights.bonus + weights.boost);
+      this.applyProfile(normal, weights.normal / total);
+      this.applyProfile(PROFILES.challenge, weights.challenge / total);
+      this.applyProfile(PROFILES.bonus, weights.bonus / total);
+      this.applyProfile(PROFILES.boost, weights.boost / total);
+      // Stage changes glide rather than cut.
+      const follow = Math.min(1, dt * 2.5);
+      NUMERIC.forEach(key => { this.state[key] += (s[key] - this.state[key]) * follow; });
+      ["fogColor", "beamColor", "flowA", "flowB", "bokehColor"].forEach(key => this.state[key].lerp(s[key], follow));
+      this.state.tint.lerp(s.tint, follow);
+
+      const kick = music.kick * music.active, level = music.level * music.active;
+      this.surge = Math.max(0, this.surge - dt * 1.6);
+      this.crowdHype = Math.max(0, this.crowdHype - dt * 0.45);
+      this.spark = Math.max(0, this.spark - dt * 1.8);
+      this.travel += dt * (this.state.speed * (1 + kick * 0.6 + level * 0.3) + this.surge * 9 + (owner.rushAmount || 0) * 42);
+
+      // Fluorescent flicker and the passing train belong to the station only.
+      if (this.state.flicker > 0.05 && time > this.flickerUntil && Math.random() < dt * 0.18) this.flickerUntil = time + 0.05 + Math.random() * 0.12;
+      const dip = time < this.flickerUntil ? (Math.sin(time * 90) > 0 ? 0.45 : 0.8) : 1;
+      this.flickerValue = 1 + (dip - 1) * this.state.flicker;
+      this.clock = time;
+      const run = this.trainRun;
+      const trainT = run ? (time - run.start) / run.duration : -9;
+      if (run && trainT > 1.2) this.trainRun = null;
+      const aspect = camera.aspect;
+      const trainPos = trainT >= 0 && trainT <= 1
+        ? (run.direction > 0 ? trainT * 0.8 : -0.8 + trainT * 0.8) * aspect
+        : -99;
+
+      const ratio = owner.renderer.getPixelRatio();
+      const flow = this.flowMaterial.uniforms;
+      flow.uTime.value = time;
+      flow.uTravel.value = this.travel;
+      flow.uSwirl.value = this.state.swirl;
+      flow.uKick.value = kick;
+      flow.uSpark.value = this.spark;
+      flow.uPixelRatio.value = ratio;
+      flow.uCamPos.value.copy(camera.position);
+      flow.uOpacity.value = this.state.flow;
+      flow.uColorA.value.copy(this.state.flowA);
+      flow.uColorB.value.copy(this.state.flowB);
+
+      const tanHalf = Math.tan(camera.fov * Math.PI / 360);
+      const haze = this.hazeMaterial.uniforms;
+      const depth = 8;
+      haze.uTime.value = time;
+      haze.uHalf.value.set(tanHalf * depth * aspect * 1.04, tanHalf * depth * 1.04);
+      haze.uDepth.value = depth;
+      haze.uAspect.value = aspect;
+      haze.uFog.value = this.state.fog;
+      haze.uFogColor.value.copy(this.state.fogColor);
+      haze.uBeams.value = this.state.beams;
+      haze.uBeamColor.value.copy(this.state.beamColor);
+      haze.uSwing.value = this.state.beamSwing;
+      haze.uSlant.value = this.state.beamSlant;
+      haze.uTrain.value = this.state.train;
+      haze.uTrainPos.value = trainPos;
+      haze.uTrainColor.value.set(run?.grade === "gold" ? 0xffc247 : run?.grade === "express" ? 0xffd9d0 : 0xd9f2ff);
+      haze.uFlicker.value = this.flickerValue;
+      haze.uKick.value = kick;
+      haze.uLevel.value = level;
+      haze.uSpark.value = this.spark;
+
+      haze.uBall.value = this.state.ball;
+
+      // Train: runs with the passing-light sweep, deep behind the station pillars.
+      const trainVisible = Boolean(run) && this.state.train > 0.3 && trainT >= -0.1 && trainT <= 1.1;
+      this.train.visible = trainVisible;
+      if (trainVisible) {
+        // Runs on the island platform's tracks (see stage-kit.js), car side facing the platform.
+        const side = 4.95 * run.direction;
+        // Kept within the lit stretch of platform so the livery reads.
+        const travel = run.direction > 0 ? -62 + trainT * 78 : 12 - trainT * 78;
+        const depth = Math.max(0, -travel - 10);
+        this.trainMaterial.opacity = Math.max(0, Math.min(1, 1.25 - depth / 45)) * Math.min(1, (1 - trainT) * 6, trainT * 6 + 0.2);
+        this.train.rotation.y = -Math.PI / 2 * run.direction;
+        this.train.scale.y = 3.3 / 2.6;
+        this.train.position.set(side, -1.55, camera.position.z + travel);
+      }
+      const crowd = this.state.crowd;
+      this.crowdRows.forEach((mesh, row) => {
+        mesh.visible = crowd > 0.02;
+        if (!mesh.visible) return;
+        const u = mesh.material.uniforms, rowDepth = row ? 6 : 4;
+        u.uHalf.value.set(tanHalf * rowDepth * aspect * 1.05, tanHalf * rowDepth);
+        // Notice hype: the hall crowd bounces harder and higher.
+        const hype = this.crowdHype;
+        u.uOpacity.value = crowd * (row ? 0.7 : 0.95) * (1 + hype * 0.25);
+        u.uBob.value = Math.sin(time * (row ? 5.2 : 6.1) * (1 + hype * 0.8)) * 0.3 * (0.3 + kick + hype * 2.2) + kick * (row ? 0.6 : 1) + hype * (row ? 1.6 : 2.4);
+        u.uShift.value = Math.sin(time * 0.05) * 0.02;
+        u.uRim.value.copy(this.state.beamColor);
+      });
+
+      const bokeh = this.bokehMaterial.uniforms;
+      bokeh.uTime.value = time;
+      bokeh.uTanHalf.value = tanHalf;
+      bokeh.uAspect.value = aspect;
+      bokeh.uPixelRatio.value = ratio;
+      bokeh.uHeight.value = owner.height || 300;
+      bokeh.uOpacity.value = this.state.bokeh * this.flickerValue;
+      bokeh.uColor.value.copy(this.state.bokehColor);
+      bokeh.uKick.value = kick;
+      bokeh.uSpark.value = this.spark;
+    }
+
+    get grade() {
+      return { contrast: this.state.contrast, tint: this.state.tint };
+    }
+  }
+
+  window.LcdMusicPulse = LcdMusicPulse;
+  window.LcdAtmosphere = LcdAtmosphere;
+})();

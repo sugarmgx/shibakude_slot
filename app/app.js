@@ -2091,14 +2091,42 @@ function spinShibakuBattle(force = null) {
   cz.lastBattleRole = roleKey;
 }
 
+// 最終G終了 -> 溜め(pushCharge) -> 決定音と同時にPUSH。溜め中はPUSHを受け付けない。
+async function chargeBattlePush() {
+  const cz = state.cz;
+  const generation = ui.operationGeneration;
+  ui.battleCharging = true;
+  renderInteractivity();
+  try {
+    await window.ShibakuEffects?.battleCharge?.({ won: Boolean(cz.heldAward) });
+  } finally {
+    if (generation === ui.operationGeneration && state.cz === cz) {
+      ui.battleCharging = false;
+      renderInteractivity();
+    }
+  }
+}
+
 async function revealBattlePush() {
   const cz = state.cz;
-  if (state.mode !== "cz" || cz?.key !== "shibaku" || !cz.pushPending || ui.battleRevealing) return;
+  if (state.mode !== "cz" || cz?.key !== "shibaku" || !cz.pushPending || ui.battleRevealing || ui.battleCharging) return;
   const generation = ui.operationGeneration;
   ui.battleRevealing = true;
   renderInteractivity();
   const won = Boolean(cz.heldAward);
-  window.ShibakuEffects?.battleReveal?.(won);
+  // 4: a beat of silence between the press and the answer.
+  if (!ui.debugFast) {
+    stopAllSoundEffects();
+    await window.ShibakuEffects?.silenceBeat?.(380);
+    if (generation !== ui.operationGeneration || state.cz !== cz) return;
+  }
+  // C9: 勝利時の一部は、一度ガラスにヒビが入ってから割れて逆転する(演出側の抽選)。
+  const revival = !ui.debugFast && won && Boolean(window.ShibakuEffects?.battleRevivalRoll?.());
+  if (revival) {
+    await window.ShibakuEffects.battleRevival();
+    if (generation !== ui.operationGeneration || state.cz !== cz) return;
+  }
+  window.ShibakuEffects?.battleReveal?.(won, { revival });
   const revealSound = playSoundEffect(won ? "ichikaku" : "challengeFail");
   if (!won) ui.battleFailureSound = revealSound;
   if (!ui.debugFast) await sleep(won ? 1400 : 650);
@@ -2335,6 +2363,14 @@ function ensureBonusMusicElements() {
   }
 }
 
+// Read-only presentation clock: lets the LCD pulse with the BGM that is
+// already audible. Never touches audio routing or game state.
+window.ShibakuMusicClock = () => {
+  const audio = ui.musicType ? ui.musicElements.get(ui.musicType) : null;
+  if (!audio || audio.paused) return null;
+  return { track: BONUS_MUSIC[ui.musicType].url.split("/").pop().split("?")[0], time: audio.currentTime };
+};
+
 function ensureSoundEffectElements() {
   for (const [key, config] of Object.entries(SOUND_EFFECTS)) {
     if (ui.sfxElements.has(key)) {
@@ -2392,7 +2428,7 @@ function playSoundEffect(key, volumeScale = 1) {
   sound.slotGainScale = config.gain * volumeScale;
   sound.slotMixer = config.mixer || "sound";
   const mixerGain = sound.slotMixer === "music" ? currentMusicGain() : ui.soundVolume;
-  sound.volume = Math.max(0, Math.min(1, mixerGain * sound.slotGainScale));
+  sound.volume = Math.max(0, Math.min(1, mixerGain * sound.slotGainScale * (ui.audioDuck ?? 1)));
   sound.currentTime = 0;
   document.documentElement.dataset.lastSfx = JSON.stringify({ key, volume: sound.volume, at: Date.now() });
   ui.activeSfx.add(sound);
@@ -2526,6 +2562,7 @@ function dismissChallengeFailure() {
 }
 
 function stopAllSoundEffects() {
+  window.ShibakuFx?.stopAll();
   for (const sound of ui.activeSfx) {
     sound.pause();
     sound.currentTime = 0;
@@ -2538,8 +2575,33 @@ function currentMusicGain() {
 }
 
 function musicTrackGain(type) {
-  return Math.min(1, currentMusicGain() * 10 ** ((BONUS_MUSIC[type]?.gainDb || 0) / 20));
+  return Math.min(1, currentMusicGain() * 10 ** ((BONUS_MUSIC[type]?.gainDb || 0) / 20)) * (ui.audioDuck ?? 1);
 }
+
+// 1: presentation ducking. BGM and sound effects sink to `target` over `ms`
+// (the "muffled" build) and snap back with target 1 (the "open" release).
+// HTMLAudio cannot be filtered on file://, so the build is a volume duck.
+function setAudioDuck(target = 1, ms = 0) {
+  cancelAnimationFrame(ui.audioDuckRaf || 0);
+  const from = ui.audioDuck ?? 1;
+  const began = performance.now();
+  const apply = () => {
+    const music = ui.musicType ? ui.musicElements.get(ui.musicType) : null;
+    if (music) music.volume = musicTrackGain(ui.musicType);
+    for (const sound of ui.activeSfx) {
+      const mixer = sound.slotMixer === "music" ? currentMusicGain() : ui.soundVolume;
+      sound.volume = Math.max(0, Math.min(1, mixer * (Number(sound.slotGainScale) || 1) * ui.audioDuck));
+    }
+  };
+  const frame = (now) => {
+    const t = ms > 0 ? Math.min(1, (now - began) / ms) : 1;
+    ui.audioDuck = from + (target - from) * t;
+    apply();
+    if (t < 1) ui.audioDuckRaf = requestAnimationFrame(frame);
+  };
+  frame(performance.now());
+}
+window.ShibakuAudioDuck = setAudioDuck;
 
 function currentMusicGainDb() {
   const gain = currentMusicGain();
@@ -2910,6 +2972,22 @@ function beginPendingSpin(afterState, force = null) {
   afterState.displayMissedRole = null;
   ui.spinning = true;
   window.ShibakuCabinet?.feedback("lever");
+  // LCD notice cue: what this game has already resolved to, handed to the
+  // presentation layer only. The notice picks its own look with its own
+  // random stream; the game lottery is never consumed or changed.
+  const leverCue = state.mode === "normal" && !middleCherryResult
+    ? { win: !["normal", "cz"].includes(afterState.mode), cz: afterState.mode === "cz", rare: isRareResult ? rareKind : "none", role: internalRoleKey }
+    : null;
+  if (leverCue) window.ShibakuEffects?.noticeCue?.(leverCue);
+  // 3 / 4: lever silence and a delayed third stop, drawn by the presentation
+  // layer from the already-resolved result.
+  const leverSilence = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.leverSilenceRoll?.(leverCue));
+  const thirdStopDelay = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.thirdStopDelayRoll?.(leverCue));
+  // 1: a promising game sounds muffled from the lever; the release opens it.
+  const czFinalGame = state.mode === "cz" && state.cz?.gamesLeft === 1;
+  if (!ui.debugFast && (leverCue || czFinalGame)) {
+    window.ShibakuEffects?.muffleCue?.(leverCue || { cz: true, czFinal: true });
+  }
   ui.spinningReels = [true, true, true];
   ui.deceleratingReels = [false, false, false];
   ui.reelPositions = state.reelStops.map((stopIndex, reelIndex) => wrapIndex(stopIndex, REEL_STRIPS[reelIndex].length));
@@ -2931,6 +3009,7 @@ function beginPendingSpin(afterState, force = null) {
     ichikakuProbability,
     ichikakuReason: middleCherryResult ? "middleCherry" : btBonus ? "btBonus" : enteringBig ? "bigBonus" : null,
     fakeReach,
+    thirdStopDelay,
     finishPromise: null,
     finishResolver: null,
   };
@@ -2938,13 +3017,32 @@ function beginPendingSpin(afterState, force = null) {
     ui.pendingSpin.finishResolver = resolve;
   });
 
-  startSpinLoop();
+  // 5: premium reverse freeze on a small share of normal-play wins
+  // (presentation-only draw; the result is already fixed).
+  // 6: the all-rotation premium is rarer still and takes precedence.
+  const premiumWin = state.mode === "normal"
+    && afterState.mode === "bonusReady"
+    && !middleCherryResult
+    && !ui.debugFast;
+  const premiumSpin = premiumWin
+    ? (window.ShibakuEffects?.allRotationRoll?.() ? "all" : window.ShibakuEffects?.reverseFreezeRoll?.() ? "reverse" : null)
+    : null;
+  if (premiumSpin) {
+    runReverseFreeze(ui.pendingSpin, afterState.bonusReady?.type === "BLUE_BIG" ? "青7" : "赤7", premiumSpin);
+  } else {
+    startSpinLoop();
+  }
   render();
+  if (state.mode === "cz" && state.cz) window.ShibakuEffects?.czLever?.(state.cz.key, state.cz.gamesLeft);
   window.ShibakuEffects?.normalCueBegin?.(state, afterState);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
     window.ShibakuEffects?.battleBeat?.(0, afterState.cz?.lastBattleRole);
   }
-  if (fakeReach) {
+  if (ui.reelFreezeActive) {
+    // The reverse freeze plays its own sound and starts the spin sound later.
+  } else if (leverSilence) {
+    // 3: no spin sound at all on the lever.
+  } else if (fakeReach) {
     playSoundEffect("fakeReach");
   } else if (!reelSpinSuppressed) {
     playSpinStartSound();
@@ -2952,6 +3050,8 @@ function beginPendingSpin(afterState, force = null) {
   document.documentElement.dataset.spinEffects = JSON.stringify({
     fakeReach,
     fakeReachRate,
+    leverSilence,
+    thirdStopDelay,
     reelSpinSuppressed,
     ichikakuArmed: ui.pendingSpin.ichikaku,
     ichikakuProbability,
@@ -2967,18 +3067,76 @@ function beginPendingSpin(afterState, force = null) {
     ui.tamaFreezePromise = triggerTamaOpportunity(0);
   }
 
-  if (state.auto) {
+  if (state.auto && !ui.reelFreezeActive) {
     autoStopPendingSpin();
   }
 
   return ui.pendingSpin.finishPromise;
 }
 
+// Reels crawl backwards and settle with the seven lined up on the middle
+// row, hold, then the normal spin starts. Stops are locked meanwhile.
+async function runReverseFreeze(pending, symbol, style = "reverse") {
+  ui.reelFreezeActive = true;
+  renderInteractivity();
+  const allRotation = style === "all";
+  const holdMs = (allRotation ? window.ShibakuEffects?.allRotation?.() : window.ShibakuEffects?.reverseFreeze?.()) || 0;
+  if (allRotation) ui.reelOverrideSymbol = symbol;
+  const starts = [...ui.reelPositions];
+  const targets = REEL_STRIPS.map((strip, reelIndex) => {
+    const index = strip.indexOf(symbol);
+    return wrapIndex(index - 1, strip.length);
+  });
+  // Reverse: crawl backwards about one turn. All-rotation: spin forwards
+  // fast in unison (every cell a seven) and brake into the line.
+  const travel = targets.map((target, reelIndex) => {
+    const length = REEL_STRIPS[reelIndex].length;
+    return allRotation
+      ? -(wrapIndex(Math.floor(starts[reelIndex]) - target, length) + (starts[reelIndex] % 1) + length * 4)
+      : wrapIndex(target - Math.floor(starts[reelIndex]), length) + length - (starts[reelIndex] % 1);
+  });
+  const crawlMs = allRotation ? 3200 : 2600;
+  const began = performance.now();
+  await new Promise((resolve) => {
+    const frame = (now) => {
+      if (ui.pendingSpin !== pending) return resolve();
+      const t = Math.min(1, (now - began) / crawlMs);
+      // Each reel finishes a little later, easing into the seven.
+      ui.reelPositions = starts.map((start, reelIndex) => {
+        const local = allRotation ? t : Math.min(1, t * (1 + (2 - reelIndex) * 0.12));
+        const eased = 1 - (1 - local) ** 3;
+        return wrapIndex(start + travel[reelIndex] * eased, REEL_STRIPS[reelIndex].length);
+      });
+      ui.displayReels = REEL_STRIPS.map((_, reelIndex) => visibleWindowFromPosition(reelIndex, ui.reelPositions[reelIndex]));
+      renderReels();
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+  ui.reelOverrideSymbol = null;
+  if (ui.pendingSpin !== pending) return;
+  ui.reelPositions = [...targets];
+  renderReels();
+  window.ShibakuEffects?.reverseFreezeAligned?.();
+  await sleep(holdMs);
+  if (ui.pendingSpin !== pending) return;
+  ui.reelFreezeActive = false;
+  ui.lastFrameAt = 0;
+  startSpinLoop();
+  playSpinStartSound();
+  renderInteractivity();
+  if (state.auto) autoStopPendingSpin();
+}
+
 async function animateReelSlip(reelIndex, targetStop, pendingAtStart = ui.pendingSpin) {
   const stripLength = REEL_STRIPS[reelIndex].length;
   const startPosition = wrapIndex(ui.reelPositions[reelIndex], stripLength);
   const travelSymbols = wrapIndex(startPosition - targetStop, stripLength);
-  const duration = scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1);
+  const slowFactor = ui.reelSlowFactor || 1;
+  const duration = slowFactor > 1
+    ? Math.max(480, scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1) * slowFactor)
+    : scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1);
 
   const specialForcedStop = ui.pendingSpin?.afterState?.mode === "bonusReady"
     || Boolean(ui.pendingSpin?.afterState?.bt?.bonusType)
@@ -3140,6 +3298,10 @@ function selectSpecialControlledCandidate(reelIndex, pending, controlTables, sto
     choices = indexedControlChoices(controlTables, desiredRoleKey, reelIndex, fixedStops, allStops);
     if (isBonusReady || isCzBonusEntry || isBTBonus) choices = middleLineOnly(choices);
   }
+  // 強制停止役（BAR揃い等）でも、挟み目非成立Gは左リールにBAR・リプレイ・BARを出さない
+  if (reelIndex === 0 && !isBabaSandwich && shouldRejectBabaSandwich(pending)) {
+    choices = choices.filter(([targetStop]) => !isBabaSandwichWindow(targetStop));
+  }
   if (!choices.length) return null;
 
   const distanceMap = displayRoleKey === "miss" ? reachable.stops : allStops;
@@ -3171,6 +3333,19 @@ function selectSpecialControlledCandidate(reelIndex, pending, controlTables, sto
   return targetStop;
 }
 
+// C1: ババアCZの挟み目成立G以外では、通常時も左リールのBAR・リプレイ・BAR挟み目を表示しない
+function shouldRejectBabaSandwich(pending) {
+  const babaFlagNotSet = state.mode === "cz"
+    && state.cz?.key === "baba"
+    && !pending.afterState.cz?.babaSandwichHitThisGame;
+  return babaFlagNotSet || state.mode === "normal";
+}
+
+function isBabaSandwichWindow(targetStop) {
+  const rows = visibleWindowFromStop(0, targetStop);
+  return BABA_SANDWICH_SYMBOLS.every((symbol, rowIndex) => rows[rowIndex] === symbol);
+}
+
 function selectControlledCandidate(reelIndex) {
   const pending = ui.pendingSpin;
   if (!pending || !ui.spinningReels[reelIndex]) {
@@ -3187,13 +3362,9 @@ function selectControlledCandidate(reelIndex) {
   const fixedStops = new Map(stoppedReels.map((index) => [index, pending.afterState.reelStops[index]]));
 
   const remainingOrder = pending.stopOrder.slice(pending.nextStop + 1);
-  const babaFlagNotSet = state.mode === "cz"
-    && state.cz?.key === "baba"
-    && !pending.afterState.cz?.babaSandwichHitThisGame;
-  // C1: ババアCZの挟み目成立G以外では、通常時も左リールのBAR・リプレイ・BAR挟み目を表示しない
-  const normalModeSandwichReject = state.mode === "normal";
+  const rejectBabaSandwich = shouldRejectBabaSandwich(pending);
   const decision = decideRoleAwareStop({
-    controlTables: babaFlagNotSet || normalModeSandwichReject ? normalControlTables : controlTables,
+    controlTables: rejectBabaSandwich ? normalControlTables : controlTables,
     policyRoleKey: pending.presentationRoleKey,
     displayRoleKey: pending.displayRoleKey,
     missedRoleKey: pending.afterState.displayMissedRole,
@@ -3202,7 +3373,7 @@ function selectControlledCandidate(reelIndex) {
     remainingOrder,
     reachableStops: reachable.stops,
     preferBottomBar: reelIndex === 0 && !state.auto,
-    rejectBabaSandwich: babaFlagNotSet || normalModeSandwichReject,
+    rejectBabaSandwich,
   });
 
   if (decision.noSafeStop) {
@@ -3396,6 +3567,8 @@ function recoverReelSpin(error, beforeState, phase) {
   ui.displayReels = null;
   ui.reelPositions = [...state.reelStops];
   ui.tamaFreezeActive = false;
+  ui.reelFreezeActive = false;
+  ui.reelOverrideSymbol = null;
   ui.tamaFreezePromise = null;
   clearTimeout(ui.actionLockTimer);
   ui.actionLockedUntil = 0;
@@ -3420,7 +3593,7 @@ async function stopReel(reelIndex) {
 }
 
 async function stopReelChecked(reelIndex) {
-  if (!ui.spinning || !ui.pendingSpin || ui.pendingSpin.resolving || ui.tamaFreezeActive) {
+  if (!ui.spinning || !ui.pendingSpin || ui.pendingSpin.resolving || ui.tamaFreezeActive || ui.reelFreezeActive) {
     return;
   }
 
@@ -3435,6 +3608,11 @@ async function stopReelChecked(reelIndex) {
   const isThirdStop = pendingAtStart.nextStop === 2;
   pendingAtStart.resolving = true;
   window.ShibakuCabinet?.feedback("stop", reelIndex);
+  if (isThirdStop && pendingAtStart.thirdStopDelay) {
+    // 4: the button answers, the reel holds on a beat before it stops.
+    await sleep(320);
+    if (ui.pendingSpin !== pendingAtStart) return;
+  }
   const targetStop = selectControlledCandidate(reelIndex);
   if (state.mode === "tama") {
     ui.tamaFreezePromise = triggerTamaOpportunity(pendingAtStart.nextStop + 1);
@@ -3442,21 +3620,37 @@ async function stopReelChecked(reelIndex) {
     if (ui.pendingSpin !== pendingAtStart) return;
   }
   ui.deceleratingReels[reelIndex] = true;
+  // 3: the reel that lines up the bonus sevens slides in slow motion.
+  const sevensLanding = isThirdStop && !ui.debugFast
+    && ["big", "blueBig", "reg"].includes(controlCatalogKey(pendingAtStart.displayRoleKey))
+    && !pendingAtStart.afterState.displayMissedRole;
+  if (sevensLanding) {
+    ui.reelSlowFactor = 7;
+    window.ShibakuEffects?.slowMotion?.(650);
+  }
   const completedSlip = await animateReelSlip(reelIndex, targetStop, pendingAtStart);
+  ui.reelSlowFactor = 1;
   if (!completedSlip || ui.pendingSpin !== pendingAtStart) return;
   ui.spinningReels[reelIndex] = false;
   ui.deceleratingReels[reelIndex] = false;
   playReelStopSound(reelIndex);
+  // 2: every stop lands with a small jolt.
+  window.ShibakuEffects?.stopJolt?.(pendingAtStart.nextStop + 1);
   window.ShibakuEffects?.normalCueStop?.(pendingAtStart.nextStop + 1, pendingAtStart.displayRoleKey);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
-    window.ShibakuEffects?.battleBeat?.(pendingAtStart.nextStop + 1, pendingAtStart.afterState.cz?.lastBattleRole);
+    window.ShibakuEffects?.battleBeat?.(pendingAtStart.nextStop + 1, pendingAtStart.afterState.cz?.lastBattleRole, {
+      held: Boolean(pendingAtStart.afterState.cz?.heldAward),
+    });
   }
 
   if (reelIndex === 0 && ui.pendingSpin.presentationRoleKey === "babaSandwich") {
     const hitNumber = ui.pendingSpin.afterState.cz?.babaSandwichHits || 0;
     if (hitNumber >= 3) {
+      // 4: silence, then the confirm sound.
       stopBonusMusic();
-      playSoundEffect("ichikaku");
+      stopAllSoundEffects();
+      const generation = ui.operationGeneration;
+      window.setTimeout(() => { if (generation === ui.operationGeneration) playSoundEffect("ichikaku"); }, ui.debugFast ? 0 : 350);
     } else {
       playSoundEffect("tenpai");
     }
@@ -3578,6 +3772,7 @@ function finishPendingSpin() {
   const pending = ui.pendingSpin;
   const resolver = pending.finishResolver;
   const beforeState = snapshotState(state);
+  const btDrumResult = state.mode === "bt" ? afterState.bt?.pendingResult ?? null : null;
   const stoppedIndexes = [...afterState.reelStops];
   afterState = settleDisplayedPayout(afterState, pending);
   afterState = finalizeSpecialPendingState(beforeState, pending, afterState);
@@ -3607,31 +3802,90 @@ function finishPendingSpin() {
   ui.displayReels = null;
   ui.pendingSpin = null;
   ui.mainActionPromise = null;
+  const enteredCz = beforeState.mode !== "cz" && afterState.mode === "cz";
+  if (enteredCz && !ui.debugFast && window.ShibakuEffects?.czDevelop) {
+    // "発展": hold the LCD before render() so the CZ scene waits for the
+    // rush / title fly-in; the title then breaks into the CZ scene.
+    window.ShibakuEffects.czDevelop(beforeState, afterState);
+    lockMainAction(1850, "cz-develop");
+  }
+  // 1 / 4 / 10: reel flash, a beat of silence and the unko reversal ahead of the result.
+  const winFromNormal = beforeState.mode === "normal" && ["bonusReady", "bonus"].includes(afterState.mode)
+    && afterState.internalRoleKey !== "middleCherry";
+  const czFromNormal = beforeState.mode === "normal" && afterState.mode === "cz";
+  if (!ui.debugFast && (winFromNormal || czFromNormal)) window.ShibakuEffects?.reelFlash?.(winFromNormal ? "win" : "cz");
+  const unkoReversal = !ui.debugFast
+    && beforeState.mode === "cz" && beforeState.cz?.key === "unko" && beforeState.cz.gamesLeft === 1
+    && afterState.mode === "bonusReady"
+    && Boolean(window.ShibakuEffects?.czRevivalRoll?.());
+  let resultSoundDelay = 0;
+  const muffleOpens = winFromNormal || czFromNormal || (beforeState.mode === "cz" && afterState.mode === "bonusReady");
+  if (unkoReversal) {
+    resultSoundDelay = window.ShibakuEffects.czRevival() || 0;
+    lockMainAction(resultSoundDelay + 300, "cz-revival");
+  } else if (winFromNormal && !ui.debugFast) {
+    stopAllSoundEffects();
+    resultSoundDelay = 380;
+    window.ShibakuEffects?.silenceBeat?.(resultSoundDelay);
+  }
+  window.ShibakuEffects?.muffleRelease?.(muffleOpens, resultSoundDelay);
+  // D10: the drum lands (slow / slip / overshoot) before the result shows.
+  const btLandingMs = btDrumResult && !ui.debugFast
+    ? window.ShibakuEffects?.btLanding?.(btDrumResult, beforeState.bt?.misses || 0) || 0
+    : 0;
+  if (enteredBabaBonusReady) {
+    // Hold the LCD before render() so "BONUS確定" enters after the blackout lifts.
+    window.ShibakuEffects?.babaBonusReady?.();
+    lockMainAction(1100, "baba-bonus-ready");
+  }
   render();
-  playTransitionSounds(beforeState, afterState);
-  playResultSound(afterState);
+  if (resultSoundDelay) {
+    const generation = ui.operationGeneration;
+    window.setTimeout(() => {
+      if (generation !== ui.operationGeneration) return;
+      playTransitionSounds(beforeState, afterState);
+      playResultSound(afterState);
+    }, resultSoundDelay);
+  } else {
+    playTransitionSounds(beforeState, afterState);
+    playResultSound(afterState);
+  }
   window.ShibakuEffects?.transition(beforeState, afterState);
   if (beforeState.mode === "bt" && ["miss", "end", "retry"].includes(afterState.btView?.result)) {
-    if (afterState.btView.result !== "retry") playSoundEffect("btMiss");
-    lockMainAction(1450, "bt-result");
+    if (afterState.btView.result !== "retry") {
+      const generation = ui.operationGeneration;
+      window.setTimeout(() => { if (generation === ui.operationGeneration) playSoundEffect("btMiss"); }, btLandingMs);
+    }
+    lockMainAction(Math.max(1450, btLandingMs + 700), "bt-result");
   }
   if (["bonus", "at", "tama"].includes(beforeState.mode) && afterState.displayRoleKey === "bell") {
     window.ShibakuCabinet?.bellPayout(afterState.settledPayout || 0);
+    // 7: coins burst out of the payout into the coin counter.
+    if (!ui.debugFast) window.ShibakuEffects?.coinShower?.(afterState.settledPayout || 0);
+  }
+  // 9: coin milestones inside the bonus.
+  // (bonus coins, and the boost's running total).
+  const coinsOf = (st) => (st.mode === "bonus" ? st.bonus?.coins : ["at", "tama"].includes(st.mode) ? st.at?.coins : null);
+  if (!ui.debugFast && coinsOf(beforeState) != null && coinsOf(afterState) != null && beforeState.mode === afterState.mode) {
+    const before = coinsOf(beforeState) || 0;
+    const after = coinsOf(afterState) || 0;
+    const mark = [500, 300, 100].find((m) => before < m && after >= m);
+    if (mark) window.ShibakuEffects?.coinMilestone?.(mark);
   }
 
   if (state.mode === "cz" && state.cz?.key === "shibaku" && state.cz.pushPending) {
     ui.battleWaitPromise = new Promise((resolve) => { ui.battleWaitResolver = resolve; });
     stopAllSoundEffects();
     stopBonusMusic();
-    window.ShibakuEffects?.battlePush?.();
-    renderInteractivity();
-    if (ui.debugFast) revealBattlePush();
+    if (ui.debugFast) {
+      window.ShibakuEffects?.battlePush?.();
+      renderInteractivity();
+      revealBattlePush();
+    } else {
+      chargeBattlePush();
+    }
   }
 
-  if (enteredBabaBonusReady) {
-    window.ShibakuEffects?.babaBonusReady?.();
-    lockMainAction(900, "baba-bonus-ready");
-  }
 
   if (afterState.vStockAwardedThisGame) {
     window.ShibakuEffects?.vStockAcquired?.(afterState);
@@ -3865,6 +4119,9 @@ function resetAll() {
   ui.battleWaitResolver = null;
   ui.battleWaitPromise = null;
   ui.battleRevealing = false;
+  ui.battleCharging = false;
+  ui.reelFreezeActive = false;
+  ui.reelOverrideSymbol = null;
   ui.battleFailureSound = null;
   ui.autoGeneration += 1;
   ui.mainActionPromise = null;
@@ -3920,15 +4177,17 @@ function renderReels() {
       const base = Math.floor(position);
       const frac = position - base;
       let cache = reelDomCache.get(reelNode);
-      if (!cache?.track || cache.base !== base) {
+      const override = ui.reelOverrideSymbol || null;
+      if (!cache?.track || cache.base !== base || cache.override !== override) {
         const track = document.createElement("div");
         track.className = "reel-track";
         for (let offset = 0; offset <= 5; offset += 1) {
-          const symbol = strip[wrapIndex(base + offset, strip.length)];
+          // 6: during the all-rotation premium every cell shows the seven.
+          const symbol = override || strip[wrapIndex(base + offset, strip.length)];
           track.appendChild(createSymbolNode(symbol, offset === 1));
         }
         reelNode.replaceChildren(track);
-        cache = { track, base };
+        cache = { track, base, override };
         reelDomCache.set(reelNode, cache);
       }
       const track = cache.track;
@@ -4303,11 +4562,13 @@ function renderButtons() {
 function renderInteractivity() {
   const maxBet = document.querySelector("#maxBetButton");
   const locked = actionLockRemaining() > 0;
-  const frozen = ui.tamaFreezeActive || Boolean(state.cz?.pushPending) || ui.battleRevealing;
+  const frozen = ui.tamaFreezeActive || ui.reelFreezeActive || Boolean(state.cz?.pushPending) || ui.battleRevealing;
   const battlePush = document.querySelector("#battlePushButton");
   if (battlePush) {
-    battlePush.disabled = !state.cz?.pushPending || ui.battleRevealing;
-    battlePush.classList.toggle("is-ready", Boolean(state.cz?.pushPending) && !ui.battleRevealing);
+    const pushReady = Boolean(state.cz?.pushPending) && !ui.battleRevealing && !ui.battleCharging;
+    const noticePush = ui.spinning && Boolean(window.ShibakuEffects?.noticePushArmed?.());
+    battlePush.disabled = !pushReady && !noticePush;
+    battlePush.classList.toggle("is-ready", pushReady);
   }
   const nonSpinAction = ui.spinning || state.auto || locked || frozen;
   dom.spinButton.disabled = state.auto || locked || frozen || (ui.spinning && Boolean(ui.pendingSpin?.resolving));
@@ -4442,6 +4703,11 @@ dom.reels.forEach((reel) => reelResizeObserver.observe(reel));
 dom.spinButton.addEventListener("click", activateSpinControl);
 
 window.addEventListener("keydown", (event) => {
+  // A4: Enter presses the lit PUSH dome during a spin (Space keeps stopping reels).
+  if (event.code === "Enter" && !event.repeat && ui.spinning && !event.target?.closest?.("button, input, select, textarea, .cabinet-drawer")) {
+    if (pressNoticePush()) event.preventDefault();
+    return;
+  }
   const reelKey = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 }[event.code];
   if ((event.code !== "Space" && reelKey === undefined) || event.repeat) return;
   const target = event.target;
@@ -4461,7 +4727,17 @@ window.addEventListener("keydown", (event) => {
   activateSpinControl();
 });
 
-document.querySelector("#battlePushButton")?.addEventListener("click", revealBattlePush);
+// A4: the lit PUSH dome during a normal spin reveals the notice color.
+function pressNoticePush() {
+  if (!window.ShibakuEffects?.noticePush?.()) return false;
+  renderInteractivity();
+  return true;
+}
+
+document.querySelector("#battlePushButton")?.addEventListener("click", () => {
+  if (pressNoticePush()) return;
+  revealBattlePush();
+});
 
 dom.autoButton.addEventListener("click", () => {
   state.auto = !state.auto;
@@ -4587,6 +4863,12 @@ ensureReelLayoutCatalog();
 logEvent("デモを起動しました");
 ensureBonusMusicElements();
 ensureSoundEffectElements();
+window.ShibakuFx?.configure({
+  context: () => ui.audioContext,
+  volume: () => ui.soundVolume,
+  enabled: () => ui.soundEnabled,
+});
+if (window.ShibakuEffects) window.ShibakuEffects.onNoticeArmed = () => renderInteractivity();
 window.ShibakuEffects?.init(
   document.querySelector("#effectStage"),
   document.querySelector("#lcdStage"),

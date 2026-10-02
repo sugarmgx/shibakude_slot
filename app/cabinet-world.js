@@ -23,7 +23,7 @@
       this.steel = material({ color: 0x455569, specular: 0xffffff });
       this.enamel = material({ color: 0xf2f4f2, specular: 0xffffff, reflectivity: .24 });
       this.glass = material({ color: 0x075d86, specular: 0xbbeeff, reflectivity: .65 });
-      this.root.add(new T.HemisphereLight(0xe9f5ff, 0x141b24, .8));
+      this.hemi = new T.HemisphereLight(0xe9f5ff, 0x141b24, .8); this.root.add(this.hemi);
       this.key = new T.PointLight(0xc8eaff, 2.5, 65);
       this.key.position.set(-5, 6, 7); this.root.add(this.key);
       this.rim = new T.PointLight(0xffb966, 2, 60);
@@ -41,6 +41,17 @@
       }
       this.createStructures(beam);
       this.createStationDetails(beam);
+      // Normal stages: a real island platform for the station and furnished
+      // rooms for the hall / lounge (see stage-kit.js). The abstract portal
+      // frames stay as a fallback when the kit or its textures are missing.
+      if (window.StageKit && window.ShibakuStageTextures) {
+        this.stageKit = new window.StageKit(this);
+        this.stationStage = this.stageKit.buildStation();
+        this.root.add(this.stationStage);
+        this.portals.forEach(portal => { portal.visible = false; });
+        this.stageKit.dressHall(this.structures.hall.group);
+        this.stageKit.dressLounge(this.structures.lounge.group);
+      }
       this.createCzLighting();
       this.createNormalCueFrame();
       this.enemy = new T.Group(); this.root.add(this.enemy);
@@ -471,6 +482,10 @@
       this.combat?.cue(beat,this.favour);
       this.waiting = false; this.outcome = null;
     }
+    // Presentation only: a punch landing (strength 0..1) and whether the
+    // enemy is visibly on the ropes.
+    enemyHit(strength = 1) { this.enemyHitAt = performance.now(); this.enemyHitStrength = strength; }
+    enemyStagger(on) { this.enemyStaggering = on; }
     babaHit(hits) {
       // Public success event only; never inspect the future CZ outcome.
       this.babaCueHits=Math.max(0,Math.min(3,hits));this.babaCueAt=performance.now();
@@ -481,7 +496,7 @@
       const battle = kind === "challenge" && variant === 2 && o.battleEnabled;
       const boost = kind === "boost", bonus = kind === "bonus";
       const speed = boost ? (variant ? 24 : 16) : bonus ? (variant === 1 ? 18 : variant === 2 ? 4 : 10) : battle ? 0 : .15;
-      this.travel += dt * speed;
+      this.travel += dt * speed * (o.speedBoost || 1);
       this.corridor.scale.x = Math.max(1, o.camera.aspect / 1.8);
       this.portals.forEach((p,i) => {
         p.position.z = 7 - ((i*4 + this.travel) % 72);
@@ -494,6 +509,7 @@
         : stage === "クラブのラウンジ" ? "lounge" : stage === "同人音楽即売会" ? "hall" : null;
       if(structure!=="baba"){this.babaCueHits=0;this.babaCueAt=-Infinity;this.babaDolly=0;}
       this.corridor.visible = !structure;
+      if (this.stationStage) { this.stationStage.visible = !structure; this.stageKit.update(dt, o.speedBoost || 1); }
       this.updateCzLighting(structure,time);
       for(const [name,profile] of Object.entries(this.structures)) {
         const boostBlueLayer=boost&&name==="blue";
@@ -506,6 +522,8 @@
           cell.visible = !normalRoom || i < (name === 'hall' ? 4 : 5);
           cell.position.z=boostBlueLayer?2-((i*7+this.travel*1.12+3.5)%70):moving?5-((i*7+this.travel)%70):normalRoom?2-i*11:-i*7;
           cell.rotation.z=boostBlueLayer?Math.sin(time*.55+i*.7)*.13:name==="red"?time*.12+i*.2:name==="reg"?time*.08:0;
+          // Rings breathe with the BGM kick; the swell fades with distance down the tunnel.
+          if(moving){const kick=(o.music?.kick||0)*(o.music?.active||0);cell.scale.setScalar(1+kick*.055*Math.max(0,1-Math.abs(cell.position.z+6)/40));}else if(cell.scale.x!==1)cell.scale.setScalar(1);
           if(name==="baba")cell.children.forEach(part=>{
             if(part.userData.doorSide) {
               const target=part.userData.doorSide*(3.4+(i<Math.max(this.babaCueHits,o.scenery?.babaHits||0)?3:0));
@@ -518,6 +536,11 @@
       this.rim.color.copy(o.theme.primary);
       this.key.intensity = boost ? 1.55 : 2.5;
       this.rim.intensity = boost ? 1.7 : bonus ? 2.5 : 1.5;
+      // The platform is lit by its own tube rows (stage-kit); the generic key /
+      // rim / sky fill would flatten it, so they drop to a faint fill there.
+      const platformLit = Boolean(this.stationStage?.visible);
+      this.hemi.intensity = platformLit ? .22 : .8;
+      if (platformLit) { this.key.intensity *= .25; this.rim.intensity *= .2; }
       // Room-specific lights must not leak into the next CZ / BONUS cut.
       this.key.position.set(-5,6,7);
       this.rim.position.set(6,-1,-4);
@@ -575,9 +598,12 @@
       this.impact.scale.setScalar(1.2+Math.min(age,1)*5);
       this.impactMaterial.opacity = attack && !this.waiting ? hit*.9 : 0;
       this.impactMaterial.color.set(this.favour > 0 ? 0xacf2ff : 0xff5b27);
-      this.enemy.position.set(recoil*.6, .25 + Math.sin(time*1.1)*.09, -3 - Math.max(0,recoil)*2 + (this.favour < 0 && attack ? hit*2 : 0));
+      const knockAge = Math.max(0, (performance.now() - (this.enemyHitAt || -1e9)) / 1000);
+      const knock = (this.enemyHitStrength || 0) * Math.exp(-knockAge * 4) * Math.sin(Math.min(Math.PI, knockAge * 9) + .4);
+      const sway = this.enemyStaggering && this.outcome === null ? 1 : 0;
+      this.enemy.position.set(recoil*.6 + sway*Math.sin(time*2.3)*.35, .25 + Math.sin(time*1.1)*.09 - sway*.12 - knock*.15, -3 - Math.max(0,recoil)*2 + (this.favour < 0 && attack ? hit*2 : 0) - knock*2.2);
       // Keep facial features vertically aligned from the player's viewpoint, including on recoil.
-      this.enemy.rotation.set(recoil*.06,recoil*.12,0);
+      this.enemy.rotation.set(recoil*.06 - knock*.25, recoil*.12, sway*Math.sin(time*2.3+.6)*.14 + knock*.18);
       this.enemy.scale.setScalar(this.outcome === true ? Math.max(.03,1.4-age*2) : 1.4);
       o.camera.position.set(attack && this.favour < 0 ? Math.sin(age*44)*hit*.18 : 0, .3, this.waiting ? 8.5 : 8.5 - (this.beat === 1 ? hit*.8 : 0));
       o.camera.fov = 52; o.camera.updateProjectionMatrix(); o.camera.lookAt(0,0,-4);

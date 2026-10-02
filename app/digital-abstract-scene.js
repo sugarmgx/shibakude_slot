@@ -12,6 +12,39 @@
   const BONUS_TUNNEL_FRAMES = 30;
   const BOOST_STREAK_COUNT = 96;
   const PRESENTATION_KEYS = ["normal", "challenge", "bonus", "boost"];
+  // Normal-stage camera angles: [pos x, y, z, look x, y, z, fov, dolly x, y, z].
+  const SHOT_SECONDS = 15;
+  // Bonus tunnel shots: [x, y, z, lookX, lookY, fov]
+  const BONUS_SHOTS = [
+    [-1.2, 0.55, 7.4, 0.7, -0.2, 54],
+    [1.4, -0.8, 6.8, -0.6, 0.4, 70],
+    [0, 0.1, 5.6, 0, 0, 46],
+    [-0.4, 1.3, 7.8, 0.3, -0.9, 60],
+    [2.0, 0.3, 7.0, -1.2, -0.1, 58],
+  ];
+  const NORMAL_SHOTS = {
+    station: [
+      [0, -0.6, 10, 0, -0.3, -30, 50, 0, 0, -3],
+      [3.4, -1.65, 8, -0.6, 0.2, -25, 58, 0, 0, -1.5],
+      [-3.6, -0.9, 6, 1.6, -0.9, -18, 50, 0, 0, -2.5],
+      [0.25, 2.95, 9, -0.4, -1.5, -14, 55, -0.5, 0, -1],
+      [-1.7, -0.9, 4, 2.2, -0.6, -22, 34, 0, 0, -1.5],
+    ],
+    hall: [
+      [0, -1.6, 8, 0, -1.3, -30, 50, 0, 0, -3],
+      [-2.5, 2.1, 6, 1, -2.5, -16, 55, 1.2, 0, -1],
+      [1.1, -2.7, 6, -0.6, -2.2, -22, 50, 0, 0.2, -2],
+      [0, -2.0, 9, 0, -1.6, -24, 62, 0, 0, -2],
+      [-2.9, -1.8, 3, -3.2, -2.2, -25, 32, 0, 0, -1.5],
+    ],
+    lounge: [
+      [0, -1.8, 8, 0, -2.1, -30, 50, 0, 0, -3],
+      [1.2, -3.3, 5, -0.5, -2.7, -20, 55, -0.6, 0, -1.5],
+      [-2.4, -2.6, 3, 2.3, -2.9, -14, 45, 0, 0, -1.5],
+      [0, 2.4, 7, 0, -3.0, -16, 60, 0, 0, -1.2],
+      [3.0, -1.3, 2, 4.4, -1.1, -24, 30, 0, 0, -1.5],
+    ],
+  };
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const smooth = (value) => value * value * (3 - 2 * value);
@@ -146,7 +179,9 @@
       this.createBonusTunnel();
       this.createBoostStreaks();
       this.createForegroundShutters();
+      this.music = window.LcdMusicPulse ? new window.LcdMusicPulse() : { update() { return this; }, kick: 0, level: 0, active: 0 };
       this.cabinetWorld = new window.CabinetWorld(this);
+      this.atmosphere = window.LcdAtmosphere ? new window.LcdAtmosphere(this) : null;
       this.createPostPipeline();
       this.title3D = window.CabinetTitle ? new window.CabinetTitle(this) : null;
       window.loadCabinetHDRI?.(this);
@@ -649,7 +684,9 @@
             vec4 previous = texture2D(uPrevious, previousUv);
             vec3 previousWide = texture2D(uPrevious, wideUv).rgb;
             float retainMask = smoothstep(0.08, 0.92, hash(floor(vUv * vec2(43.0, 17.0)) + floor(uTime * 0.7)) + uFeedback * 0.42);
-            float retain = uFeedback * (0.44 + retainMask * 0.45) * (1.0 - uCut * 0.86);
+            // Echoes zoom toward the vanishing point; keep them from stacking into a white core.
+            float centreGuard = mix(0.2, 1.0, smoothstep(0.03, 0.3, length(center * vec2(1.6, 1.0))));
+            float retain = uFeedback * (0.44 + retainMask * 0.45) * (1.0 - uCut * 0.86) * centreGuard;
             vec3 echo = previous.rgb * (0.91 - uFeedback * 0.12);
             float wideRetain = uFeedback * uFeedback * (0.10 + retainMask * 0.12) * (1.0 - uCut);
             vec3 color = current.rgb + echo * retain + previousWide * wideRetain;
@@ -681,6 +718,9 @@
           // The cabinet has a final optical layer shared with DOM lettering.
           // Standalone scene previews retain the shader's native LCD mask.
           uPanelFx: { value: this.host.closest('.lcd-screen')?.querySelector('.lcd-post-fx') ? 0 : 1 },
+          uFocus: { value: 0.12 },
+          uFocusRange: { value: 0.35 },
+          uDof: { value: 0 },
         },
         vertexShader: `
           varying vec2 vUv;
@@ -703,6 +743,9 @@
           uniform float uCut;
           uniform float uClarity;
           uniform float uPanelFx;
+          uniform float uFocus;
+          uniform float uFocusRange;
+          uniform float uDof;
 
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float rect(vec2 p, vec2 center, vec2 size) {
@@ -759,6 +802,20 @@
             vec2 pixelizedUv = (floor(panelUv) + 0.5) / panelResolution;
             vec2 contentUv = mix(uv, mix(pixelizedUv, uv, removePixels), uPanelFx);
             vec3 color = texture2D(uTexture, contentUv).rgb;
+            // Depth of field: the background past the focus plane melts into a
+            // soft disc blur so foreground structure and lettering stand out.
+            float dofDepth = linearDepth(texture2D(uDepth, uv).r);
+            float coc = clamp((dofDepth - uFocus) / max(0.001, uFocusRange), 0.0, 1.0) * uDof;
+            if (coc > 0.02) {
+              vec2 radius = coc * 5.5 / safeResolution;
+              vec3 blurred = color;
+              for (int i = 0; i < 10; i++) {
+                float angle = float(i) * 2.39996 + 0.4;
+                float ring = mix(0.45, 1.0, mod(float(i), 2.0));
+                blurred += texture2D(uTexture, clamp(contentUv + vec2(cos(angle), sin(angle)) * ring * radius, vec2(0.001), vec2(0.999))).rgb;
+              }
+              color = blurred / 11.0;
+            }
             float maskVisibility = (1.0 - removePixels) * 0.22 * uPanelFx;
             vec3 lcdMask = mix(vec3(1.0), lcdSubpixelMask(panelUv), maskVisibility);
             color *= lcdMask;
@@ -833,6 +890,688 @@
       }));
       this.displayQuad = new THREE.Mesh(quadGeometry, this.displayMaterial);
       this.displayScene.add(this.displayQuad);
+      this.createImpactPipeline(quadGeometry);
+    }
+
+    // Final optical stage: the finished LCD frame (scene + 3D lettering) is
+    // bloomed from its own highlights, then an impact layer adds the
+    // hold / release beat (darken, whiteout, shockwave, colour fringing).
+    createImpactPipeline(quadGeometry) {
+      const { THREE } = this;
+      const renderer = this.renderer;
+      this.hdrTargets = Boolean(renderer.capabilities.isWebGL2 && renderer.extensions.has("EXT_color_buffer_float"));
+      this.bloomTargets = [];
+      this.impactFx = null;
+      this.fxScene = new THREE.Scene();
+      this.fxQuad = new THREE.Mesh(quadGeometry, null);
+      this.fxQuad.frustumCulled = false;
+      this.fxScene.add(this.fxQuad);
+      const vertexShader = `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `;
+      this.bloomDownMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uTexture: { value: null },
+          uTexel: { value: new THREE.Vector2(1, 1) },
+          uThreshold: { value: 0.74 },
+          uPrefilter: { value: 1 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uTexture;
+          uniform vec2 uTexel;
+          uniform float uThreshold;
+          uniform float uPrefilter;
+          vec3 tap(vec2 offset) { return texture2D(uTexture, clamp(vUv + offset * uTexel, vec2(0.0005), vec2(0.9995))).rgb; }
+          void main() {
+            vec3 color = tap(vec2(0.0)) * 0.5
+              + (tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0))) * 0.125;
+            if (uPrefilter > 0.5) {
+              float brightness = max(color.r, max(color.g, color.b));
+              float knee = uThreshold * 0.5;
+              float soft = clamp(brightness - uThreshold + knee, 0.0, 2.0 * knee);
+              soft = soft * soft / (4.0 * knee + 0.0001);
+              color *= max(soft, brightness - uThreshold) / max(brightness, 0.0001);
+            }
+            gl_FragColor = vec4(min(color, vec3(6.0)), 1.0);
+          }
+        `,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      this.bloomUpMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uTexture: { value: null },
+          uTexel: { value: new THREE.Vector2(1, 1) },
+          uWeight: { value: 1 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uTexture;
+          uniform vec2 uTexel;
+          uniform float uWeight;
+          vec3 tap(vec2 offset) { return texture2D(uTexture, clamp(vUv + offset * uTexel, vec2(0.0005), vec2(0.9995))).rgb; }
+          void main() {
+            vec3 color = tap(vec2(0.0)) * 4.0
+              + (tap(vec2(-1.0, 0.0)) + tap(vec2(1.0, 0.0)) + tap(vec2(0.0, -1.0)) + tap(vec2(0.0, 1.0))) * 2.0
+              + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0));
+            gl_FragColor = vec4(color / 16.0 * uWeight, 1.0);
+          }
+        `,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      }));
+      this.impactMaterial = this.trackMaterial(new THREE.ShaderMaterial({
+        uniforms: {
+          uScene: { value: null },
+          uBloom: { value: null },
+          uResolution: { value: new THREE.Vector2(1, 1) },
+          uCenter: { value: new THREE.Vector2(0.5, 0.52) },
+          uShake: { value: new THREE.Vector2(0, 0) },
+          uZoom: { value: 1 },
+          uBloomStrength: { value: 0.2 },
+          uImpactAge: { value: 99 },
+          uImpactStrength: { value: 0 },
+          uImpactColor: { value: new THREE.Color(1, 1, 1) },
+          uWarp: { value: 1 },
+          uHold: { value: 0 },
+          uFlash: { value: 0 },
+          uRays: { value: 0 },
+          uRipple: { value: new THREE.Vector2(99, 0) },
+          uStop: { value: new THREE.Vector3(0.5, 99, 0) },
+          uContrast: { value: 0 },
+          uTint: { value: new THREE.Vector3(1, 1, 1) },
+          uPulse: { value: 0 },
+          uStreak: { value: null },
+          uAnamorphic: { value: 0.3 },
+          uFloor: { value: 0 },
+          uTime: { value: 0 },
+          uPrev: { value: null },
+          uWipe: { value: 1 },
+          uWipeType: { value: 0 },
+        },
+        vertexShader,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform sampler2D uScene;
+          uniform sampler2D uBloom;
+          uniform vec2 uResolution;
+          uniform vec2 uCenter;
+          uniform vec2 uShake;
+          uniform float uZoom;
+          uniform float uBloomStrength;
+          uniform float uImpactAge;
+          uniform float uImpactStrength;
+          uniform vec3 uImpactColor;
+          uniform float uWarp;
+          uniform float uHold;
+          uniform float uFlash;
+          uniform float uRays;
+          uniform vec2 uRipple;
+          uniform vec3 uStop;
+          uniform float uContrast;
+          uniform vec3 uTint;
+          uniform float uPulse;
+          uniform sampler2D uStreak;
+          uniform float uAnamorphic;
+          uniform float uFloor;
+          uniform float uTime;
+          uniform sampler2D uPrev;
+          uniform float uWipe;
+          uniform float uWipeType;
+          float hash12(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
+
+          vec3 sampleScene(vec2 uv) { return texture2D(uScene, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
+          vec3 sampleBloom(vec2 uv) { return texture2D(uBloom, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb; }
+          // Untouched below the knee, so ordinary frames keep their grade;
+          // only whiteouts and stacked glow roll off instead of clipping flat.
+          vec3 shoulder(vec3 color) {
+            vec3 over = max(color - 0.9, 0.0);
+            return min(color, vec3(0.9)) + 0.1 * (1.0 - exp(-over * 6.0));
+          }
+
+          void main() {
+            vec2 aspect = vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
+            vec2 uv = (vUv - uCenter) / uZoom + uCenter + uShake;
+            vec2 delta = (uv - uCenter) * aspect;
+            float dist = length(delta);
+            vec2 dir = dist > 0.0001 ? delta / dist / aspect : vec2(0.0);
+            float live = uImpactStrength * (1.0 - smoothstep(0.0, 1.15, uImpactAge));
+            float radius = uImpactAge * 2.1;
+            float ring = exp(-pow((dist - radius) / 0.075, 2.0)) * live;
+            // Lever-on: a thin, quick ripple runs outward from the centre.
+            float rippleLive = uRipple.y * (1.0 - smoothstep(0.0, 0.8, uRipple.x));
+            float ripple = exp(-pow((dist - uRipple.x * 1.7) / 0.045, 2.0)) * rippleLive;
+            vec2 warped = uv - dir * (ring * 0.032 + ripple * 0.01) * uWarp;
+            float fringe = (0.0042 * live * exp(-uImpactAge * 3.2) + ring * 0.006) * uWarp + uHold * 0.0014;
+            vec3 color = vec3(
+              sampleScene(warped + dir * fringe).r,
+              sampleScene(warped).g,
+              sampleScene(warped - dir * fringe).b
+            );
+            color *= 1.0 - uHold * (0.5 + 0.42 * smoothstep(0.12, 0.85, dist));
+            vec3 graded = clamp(color, 0.0, 1.0);
+            graded = graded * graded * (3.0 - 2.0 * graded);
+            color = mix(color, graded, uContrast) * uTint * (1.0 + uPulse);
+            color += sampleBloom(warped) * uBloomStrength;
+            // Anamorphic flare: bright points stretch into thin horizontal streaks.
+            vec3 streak = vec3(0.0);
+            for (int i = -7; i <= 7; i++) {
+              float fi = float(i);
+              streak += texture2D(uStreak, clamp(warped + vec2(fi * 0.021, 0.0), vec2(0.0005), vec2(0.9995))).rgb * exp(-abs(fi) * 0.3);
+            }
+            streak *= 0.15;
+            float streakLuma = dot(streak, vec3(0.3, 0.5, 0.2));
+            color += mix(vec3(0.55, 0.78, 1.0) * streakLuma, streak, 0.4) * uAnamorphic;
+            // Glossy floor: the lower band mirrors the tunnel above it.
+            if (uFloor > 0.001) {
+              float horizon = 0.32;
+              float below = horizon - vUv.y;
+              if (below > 0.0) {
+                vec2 mirror = vec2(warped.x + sin(vUv.y * 140.0 + uTime * 2.0) * 0.0015, horizon + below * 1.2);
+                color += sampleScene(mirror) * (1.0 - smoothstep(0.0, horizon, below)) * 0.12 * uFloor;
+              }
+            }
+            if (uRays > 0.001) {
+              vec3 rays = vec3(0.0);
+              vec2 stepUv = (warped - uCenter) * 0.055;
+              vec2 cursor = warped;
+              float weight = 1.0;
+              for (int index = 0; index < 10; index++) {
+                cursor -= stepUv;
+                rays += sampleBloom(cursor) * weight;
+                weight *= 0.85;
+              }
+              color += rays * 0.08 * uRays;
+            }
+            color += uImpactColor * ring * 0.5;
+            color += vec3(0.75, 0.88, 1.0) * ripple * 0.07;
+            // Reel stop: a soft light column over the reel that just stopped.
+            float column = exp(-pow((vUv.x - uStop.x) / 0.075, 2.0)) * uStop.z * exp(-uStop.y * 7.0);
+            color += color * column * 0.32 + vec3(1.0, 0.96, 0.9) * column * 0.035;
+            color += mix(vec3(1.0), uImpactColor, 0.35) * uFlash;
+            // Scene-change wipe over the last frame of the previous scene.
+            if (uWipe < 0.999) {
+              float p = uWipe;
+              float reveal = 1.0;
+              float edge = 0.0;
+              vec2 prevUv = vUv;
+              if (uWipeType < 0.5) {
+                float slats = 9.0;
+                float slat = floor(vUv.y * slats);
+                float local = abs(fract(vUv.y * slats) - 0.5) * 2.0;
+                float open = p * 1.35 - hash12(vec2(slat, 3.0)) * 0.3;
+                reveal = step(local, open);
+                edge = (1.0 - smoothstep(0.0, 0.06, abs(local - open))) * (1.0 - p);
+              } else if (uWipeType < 1.5) {
+                vec2 grid = vec2(16.0, 5.0);
+                vec2 cell = floor(vUv * grid);
+                vec2 cellCentre = (cell + 0.5) / grid;
+                float delay = hash12(cell) * 0.35 + length((cellCentre - 0.5) * vec2(1.6, 1.0)) * 0.45;
+                float t = clamp((p - delay) / 0.4, 0.0, 1.0);
+                reveal = step(0.999, t);
+                prevUv = cellCentre + (vUv - cellCentre) * (1.0 + t * 0.35) + vec2((hash12(cell + 7.0) - 0.5) * t * 0.08, -t * t * 0.28);
+                vec2 inCell = abs(fract(vUv * grid) - 0.5);
+                edge = (1.0 - smoothstep(0.44, 0.5, max(inCell.x, inCell.y))) < 0.5 ? (1.0 - p) * 0.8 : 0.0;
+              } else if (uWipeType < 2.5) {
+                float line = vUv.x + (vUv.y - 0.5) * 0.35;
+                float front = p * 1.5 - 0.25;
+                reveal = step(line, front);
+                edge = 1.0 - smoothstep(0.0, 0.025, abs(line - front));
+              } else {
+                // Travel: fly into the old stage until it streams past, then arrive.
+                vec2 fromCentre = vUv - 0.5;
+                prevUv = 0.5 + fromCentre / (1.0 + p * p * 3.0);
+                reveal = smoothstep(0.35, 0.8, p);
+                float angleId = floor(atan(fromCentre.y, fromCentre.x * 1.8) * 40.0);
+                edge = step(0.82, hash12(vec2(angleId, 5.0))) * smoothstep(0.12, 0.6, length(fromCentre * vec2(1.8, 1.0))) * sin(3.14159 * p) * 0.5;
+              }
+              vec3 previous = texture2D(uPrev, clamp(prevUv, vec2(0.0005), vec2(0.9995))).rgb;
+              if (uWipeType > 2.5) previous *= 1.0 + p * 1.2;
+              color = mix(previous, color, reveal) + vec3(1.0, 0.95, 0.88) * edge * 0.6;
+            }
+            // Photographic grain: a faint per-frame sensor noise.
+            color += (hash12(vUv * uResolution + fract(uTime * 7.13) * 91.0) - 0.5) * 0.018;
+            gl_FragColor = vec4(shoulder(color), 1.0);
+          }
+        `,
+        depthTest: false,
+        depthWrite: false,
+      }));
+    }
+
+    makeFxTarget(width, height, { depth = false, samples = 0 } = {}) {
+      const { THREE } = this;
+      const target = new THREE.WebGLRenderTarget(width, height, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: this.hdrTargets ? THREE.HalfFloatType : THREE.UnsignedByteType,
+        depthBuffer: depth,
+        stencilBuffer: false,
+      });
+      target.texture.generateMipmaps = false;
+      if (samples && this.renderer.capabilities.isWebGL2) target.samples = samples;
+      this.renderTargets.push(target);
+      return target;
+    }
+
+    // Visible board actions (lever, reel stops, bell payout) nudge the panel.
+    boardBeat(kind, reelIndex = 0) {
+      const now = performance.now();
+      this.board ||= {};
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (kind === "lever") {
+        this.board.rippleAt = now;
+        this.board.stops = 0;
+        this.cutTarget = null;
+      } else if (kind === "stop") {
+        this.board.stopAt = now;
+        this.board.stopX = [0.27, 0.5, 0.73][reelIndex] ?? 0.5;
+        this.board.stops = (this.board.stops || 0) + 1;
+        // The picture never holds on a stop: the LCD keeps running.
+      }
+      this.atmosphere?.board(kind);
+    }
+
+    // Notice at lever-on. At the station it is a train (grade = look);
+    // elsewhere the camera dashes forward down the stage and back.
+    notice(grade = "normal", direction = 1, tier = null) {
+      const stage = this.scenery?.stage;
+      const station = this.presentation.kind === "normal" && stage !== "同人音楽即売会" && stage !== "クラブのラウンジ";
+      if (station && this.atmosphere) this.atmosphere.runTrain(grade, direction, tier);
+      else this.rush({ duration: grade === "normal" ? 0.8 : 1.0, strength: grade === "normal" ? 0.55 : grade === "express" ? 0.85 : 1.05, returns: true });
+      if (grade === "gold") {
+        window.setTimeout(() => this.impact({ strength: 0.6, hold: 0, color: 0xffc247, rays: 0.8, flash: 0.35, disturb: false }), station ? 620 : 420);
+      }
+    }
+
+    // Hit stop: the picture holds still for a few frames.
+    hitStop(ms = 70) {
+      this.freezeUntil = Math.max(this.freezeUntil || 0, performance.now() + ms);
+    }
+
+    // Slow motion for `ms` at `scale` of normal speed.
+    slowMotion(ms = 500, scale = 0.25) {
+      this.slowUntil = performance.now() + ms;
+      this.slowScale = scale;
+    }
+
+    // Hall notice: the crowd jumps (0..1).
+    crowdSurge(amount = 1) {
+      if (this.atmosphere) this.atmosphere.crowdHype = Math.max(this.atmosphere.crowdHype || 0, amount);
+    }
+
+    // Lounge notice: the floor gives way (0..1); the camera drops and shakes.
+    floorSink(depth = 0.5) {
+      this.sinkFx = { at: performance.now(), depth: Math.max(this.sinkFx?.live ? this.sinkFx.depth : 0, depth), live: true };
+    }
+
+    rush({ duration = 0.8, strength = 1, returns = true } = {}) {
+      this.rushFx = { at: performance.now(), duration, strength, returns };
+    }
+
+    develop({ rushMs = 650 } = {}) {
+      this.rush({ duration: rushMs / 1000 + 0.85, strength: 1.25, returns: false });
+      this.nextWipeType = 1;
+      // Black hold while "発展" flies in; the release lands with the title.
+      window.setTimeout(() => this.impact({ strength: 0.45, hold: 0.3, color: 0xffb43b, rays: 0.2, flash: 0.35 }), rushMs);
+    }
+
+    // 50G stage change: travel through the old stage into the new one.
+    stageTravel() {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+      this.captureTransition(3);
+      this.arriveFx = { at: performance.now() };
+    }
+
+    // BIG progress (coins / limit, already on screen): an orbit at the
+    // halfway mark and a faster tunnel over the final stretch.
+    bonusProgress(ratio = 0) {
+      const previous = this.lastBonusRatio ?? 0;
+      if (ratio < previous - 0.05) this.halfwayDone = false;
+      if (!this.halfwayDone && previous < 0.5 && ratio >= 0.5 && ratio < 1) {
+        this.halfwayDone = true;
+        this.orbitFx = { at: performance.now() };
+        this.impact({ strength: 0.5, hold: 0, color: this.theme.primary.getHex(), rays: 0.7, flash: 0.3 });
+      }
+      this.finalStretch = ratio >= 0.85 && ratio < 1;
+      this.lastBonusRatio = ratio;
+    }
+
+    // Bonus result: the camera pulls back out of the tunnel while counting.
+    resultPullout(durationMs = 4000) {
+      this.pulloutFx = { at: performance.now(), duration: Math.min(4, durationMs / 1000) };
+    }
+
+    // Normal stages: five authored angles per stage, cut every 15 seconds on
+    // the wall clock alone (no lever / button input involved), each with a
+    // slow dolly across its 15 seconds.
+    applyNormalShot(now) {
+      if (this.presentation.kind !== "normal" || this.presentationWeights.normal < 0.5 || !this.cabinetWorld?.stageKit) return;
+      const stage = this.scenery?.stage;
+      const key = stage === "同人音楽即売会" ? "hall" : stage === "クラブのラウンジ" ? "lounge" : "station";
+      const shots = NORMAL_SHOTS[key];
+      const slot = Math.floor(now / SHOT_SECONDS / 1000);
+      const [px, py, pz, lx, ly, lz, fov, dx, dy, dz] = shots[slot % shots.length];
+      const t = smooth((now / 1000 % SHOT_SECONDS) / SHOT_SECONDS);
+      const sx = key === "station" ? 1 : this.cabinetWorld.structures[key]?.group.scale.x || 1;
+      this.camera.position.set((px + dx * t) * sx, py + dy * t, pz + dz * t);
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+      this.camera.lookAt((lx + dx * t * 0.5) * sx, ly + dy * t * 0.5, lz + dz * t);
+    }
+
+    applyCameraMoves(now, dt) {
+      const camera = this.camera;
+      let fov = 0, rushAmount = 0;
+      const rush = this.rushFx;
+      if (rush) {
+        const t = (now - rush.at) / 1000 / rush.duration;
+        if (t >= 1) this.rushFx = null;
+        else {
+          const envelope = rush.returns ? Math.sin(Math.PI * Math.min(1, t)) : Math.min(1, t * 2.2);
+          rushAmount = envelope * rush.strength;
+          // A returning dash nudges forward and back; a develop rush keeps
+          // accelerating down the stage until the cut.
+          camera.position.z -= rush.returns ? rushAmount * 4.5 : rush.strength * 22 * t * t;
+          fov += rushAmount * 24;
+        }
+      }
+      const sink = this.sinkFx;
+      if (sink) {
+        const t = (now - sink.at) / 1000;
+        if (t > 3) this.sinkFx = null;
+        else {
+          const drop = sink.depth * Math.min(1, t * 6) * (t < 2 ? 1 : 1 - (t - 2));
+          const shake = Math.exp(-t * 3.5) * sink.depth;
+          sink.live = t < 2;
+          camera.position.y -= drop * 1.1;
+          camera.position.x += Math.sin(t * 57) * shake * 0.12;
+          camera.rotation.z += Math.sin(t * 41) * shake * 0.02;
+          fov += drop * 6;
+        }
+      }
+      const arrive = this.arriveFx;
+      if (arrive) {
+        const t = (now - arrive.at) / 900;
+        if (t >= 1) this.arriveFx = null;
+        else { const k = (1 - t) ** 2; camera.position.z += k * 7; fov += k * 18; rushAmount = Math.max(rushAmount, k * 0.9); }
+      }
+      const orbit = this.orbitFx;
+      if (orbit) {
+        const t = (now - orbit.at) / 1700;
+        if (t >= 1) this.orbitFx = null;
+        else {
+          const angle = smooth(t) * Math.PI * 2, reach = Math.sin(Math.PI * t);
+          camera.position.x += Math.sin(angle) * 3.2 * reach;
+          camera.position.y += (1 - Math.cos(angle)) * 0.5 * reach;
+          camera.lookAt(0.4, -0.2, -16);
+        }
+      }
+      const pullout = this.pulloutFx;
+      if (pullout) {
+        const t = (now - pullout.at) / 1000 / pullout.duration;
+        if (t >= 1.2) this.pulloutFx = null;
+        else { const k = smooth(clamp(t, 0, 1)); camera.position.z += k * 9; fov -= k * 8; }
+      }
+      this.rushAmount = rushAmount;
+      this.speedBoost = 1 + rushAmount * 6 + (this.finalStretch && this.presentation.kind === "bonus" ? 0.7 : 0);
+      if (fov) { camera.fov = clamp(camera.fov + fov, 20, 110); camera.updateProjectionMatrix(); }
+    }
+
+    // Starts a hold → release beat. `hold` seconds of darkening and a slow
+    // push-in precede the hit; the hit itself whites out, rings and settles.
+    impact(options = {}) {
+      const { THREE } = this;
+      const now = performance.now();
+      const hold = clamp(Number(options.hold) || 0, 0, 1.2);
+      const strength = clamp(Number(options.strength) || 1, 0, 1.5);
+      if (this.impactFx && now < this.impactFx.releaseAt + 180 && this.impactFx.strength > strength) return;
+      this.impactFx = {
+        startedAt: now,
+        releaseAt: now + hold * 1000,
+        hold,
+        strength,
+        color: new THREE.Color(options.color ?? 0xffffff),
+        rays: clamp(Number(options.rays) || 0, 0, 1.5),
+        flash: clamp(options.flash ?? 1, 0, 1.5),
+        disturb: options.disturb ?? true,
+        released: false,
+      };
+      // DOM lettering sits above the canvas; let it sink with the hold too.
+      if (hold > 0) this.host.closest(".lcd-screen")?.setAttribute("data-impact-hold", "");
+    }
+
+    updateImpact(now) {
+      const uniforms = this.impactMaterial.uniforms;
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      const weights = this.presentationWeights;
+      let bloom = 0.1 * weights.normal + 0.15 * weights.challenge + 0.15 * weights.bonus + 0.17 * weights.boost
+        + this.eventPulse * 0.02;
+      let hold = 0, zoom = 1, flash = 0, rays = 0, age = 99, strength = 0, shake = 0;
+      const fx = this.impactFx;
+      if (fx) {
+        if (now < fx.releaseAt) {
+          const progress = clamp((now - fx.startedAt) / Math.max(1, fx.releaseAt - fx.startedAt), 0, 1);
+          hold = smooth(clamp(progress * 2.4, 0, 1)) * Math.min(1, 0.55 + fx.hold);
+          zoom = 1 + progress * progress * 0.03 * fx.strength;
+        } else {
+          if (!fx.released) {
+            fx.released = true;
+            this.host.closest(".lcd-screen")?.removeAttribute("data-impact-hold");
+            if (fx.disturb) this.pulse(2.2 * fx.strength);
+          }
+          age = (now - fx.releaseAt) / 1000;
+          strength = fx.strength;
+          hold = Math.min(1, 0.55 + fx.hold) * Math.exp(-age * 22);
+          flash = fx.flash * fx.strength * Math.exp(-age * 11) * 0.9;
+          zoom = 1 + fx.strength * 0.055 * Math.exp(-age * 5.5) * (1 - Math.exp(-age * 40));
+          rays = fx.rays * fx.strength * Math.exp(-age * 2.1);
+          shake = fx.strength * 0.0055 * Math.exp(-age * 8);
+          bloom += fx.strength * 0.42 * Math.exp(-age * 3);
+          if (age > 2.6) this.impactFx = null;
+        }
+        uniforms.uImpactColor.value.copy(fx.color);
+      }
+      const kick = this.music.kick * this.music.active;
+      bloom += kick * 0.1;
+      const board = this.board || {};
+      const rippleAge = board.rippleAt ? (now - board.rippleAt) / 1000 : 99;
+      const stopAge = board.stopAt ? (now - board.stopAt) / 1000 : 99;
+      uniforms.uRipple.value.set(rippleAge, rippleAge < 1 ? 1 : 0);
+      uniforms.uStop.value.set(board.stopX ?? 0.5, stopAge, stopAge < 1 ? 1 : 0);
+      const grade = this.atmosphere?.grade;
+      uniforms.uContrast.value = grade ? grade.contrast : 0;
+      if (grade) uniforms.uTint.value.copy(grade.tint);
+      uniforms.uPulse.value = kick * 0.05;
+      uniforms.uTime.value = now / 1000;
+      uniforms.uAnamorphic.value = 0.22 * weights.normal + 0.26 * weights.challenge + 0.24 * weights.bonus + 0.3 * weights.boost
+        + (fx && fx.released ? fx.strength * 0.5 * Math.exp(-age * 2.5) : 0) + kick * 0.12 + (this.rushAmount || 0) * 0.35;
+      uniforms.uFloor.value = this.lowQuality ? 0 : weights.bonus;
+      if (this.lowQuality) uniforms.uAnamorphic.value *= 0.5;
+      const wipeAge = this.wipe ? (now - this.wipe.at) / 1000 : 99;
+      uniforms.uWipe.value = reduced ? 1 : clamp(wipeAge / (this.wipe?.type === 3 ? 0.8 : 0.55), 0, 1);
+      if (this.wipe) uniforms.uWipeType.value = this.wipe.type;
+      const display = this.displayMaterial.uniforms;
+      display.uDof.value = reduced || this.lowQuality ? 0 : 0.45 * weights.normal + 0.6 * weights.challenge + 0.75 * weights.bonus + 0.5 * weights.boost;
+      display.uFocus.value = 0.1 * weights.normal + 0.09 * weights.challenge + 0.06 * weights.bonus + 0.08 * weights.boost;
+      if (reduced) { zoom = 1; shake = 0; flash *= 0.4; uniforms.uRipple.value.y = 0; }
+      uniforms.uWarp.value = reduced ? 0 : 1;
+      uniforms.uBloomStrength.value = bloom;
+      uniforms.uImpactAge.value = age;
+      uniforms.uImpactStrength.value = strength;
+      uniforms.uHold.value = hold;
+      uniforms.uFlash.value = flash;
+      uniforms.uRays.value = rays;
+      uniforms.uZoom.value = zoom;
+      uniforms.uShake.value.set(Math.sin(now * 0.093) * shake, Math.cos(now * 0.117) * shake * 0.7);
+    }
+
+    renderImpact(now) {
+      const renderer = this.renderer;
+      const autoClear = renderer.autoClear;
+      this.updateImpact(now);
+      // Bloom mip chain: threshold into the first level, then downsample.
+      let source = this.compositeTarget;
+      this.fxQuad.material = this.bloomDownMaterial;
+      this.bloomTargets.forEach((target, index) => {
+        this.bloomDownMaterial.uniforms.uTexture.value = source.texture;
+        this.bloomDownMaterial.uniforms.uTexel.value.set(1 / source.width, 1 / source.height);
+        this.bloomDownMaterial.uniforms.uPrefilter.value = index === 0 ? 1 : 0;
+        renderer.setRenderTarget(target);
+        renderer.render(this.fxScene, this.postCamera);
+        source = target;
+      });
+      // Tent upsample accumulates each coarser level into the finer one.
+      renderer.autoClear = false;
+      this.fxQuad.material = this.bloomUpMaterial;
+      for (let index = this.bloomTargets.length - 1; index > 0; index -= 1) {
+        const from = this.bloomTargets[index];
+        this.bloomUpMaterial.uniforms.uTexture.value = from.texture;
+        this.bloomUpMaterial.uniforms.uTexel.value.set(1 / from.width, 1 / from.height);
+        this.bloomUpMaterial.uniforms.uWeight.value = 0.85;
+        renderer.setRenderTarget(this.bloomTargets[index - 1]);
+        renderer.render(this.fxScene, this.postCamera);
+      }
+      renderer.autoClear = autoClear;
+      this.fxQuad.material = this.impactMaterial;
+      this.impactMaterial.uniforms.uScene.value = this.compositeTarget.texture;
+      this.impactMaterial.uniforms.uBloom.value = this.bloomTargets[0].texture;
+      this.impactMaterial.uniforms.uStreak.value = this.bloomTargets[2].texture;
+      this.impactMaterial.uniforms.uPrev.value = this.transitionTarget.texture;
+      renderer.setRenderTarget(null);
+      renderer.render(this.fxScene, this.postCamera);
+      this.sampleGlow(now);
+    }
+
+    // Colour the cabinet lamps with the light the panel is actually emitting:
+    // a tiny left / centre / right read of the bloom chain every few frames.
+    // Colour the cabinet lamps with the light the panel is actually emitting:
+    // a tiny left / centre / right read of the bloom chain. The read is
+    // asynchronous (pixel-pack buffer + fence) so the GPU never stalls the
+    // frame; without WebGL2 the lamps follow the theme colour instead.
+    sampleGlow(now) {
+      const renderer = this.renderer, gl = renderer.getContext();
+      const async = renderer.capabilities.isWebGL2 && typeof gl.fenceSync === "function";
+      if (this.glowFence) {
+        const status = gl.clientWaitSync(this.glowFence, 0, 0);
+        if (status === gl.TIMEOUT_EXPIRED) return;
+        gl.deleteSync(this.glowFence);
+        this.glowFence = null;
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.glowPixels);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        this.applyGlow();
+      }
+      if (now - (this.glowSampledAt || 0) < 120) return;
+      this.glowSampledAt = now;
+      if (!async) { this.glowPixels.fill(0); this.applyGlow(); return; }
+      this.fxQuad.material = this.bloomDownMaterial;
+      const source = this.bloomTargets[3];
+      this.bloomDownMaterial.uniforms.uTexture.value = source.texture;
+      this.bloomDownMaterial.uniforms.uTexel.value.set(1 / source.width, 1 / source.height);
+      this.bloomDownMaterial.uniforms.uPrefilter.value = 0;
+      renderer.setRenderTarget(this.glowTarget);
+      renderer.render(this.fxScene, this.postCamera);
+      if (!this.glowPbo) {
+        this.glowPbo = gl.createBuffer();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, this.glowPixels.byteLength, gl.STREAM_READ);
+      }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.glowPbo);
+      gl.readPixels(0, 0, 8, 2, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      this.glowFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      renderer.setRenderTarget(null);
+      this.fxQuad.material = this.impactMaterial;
+    }
+
+    applyGlow() {
+      const px = this.glowPixels, base = this.theme.primary;
+      const zone = (from, to) => {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let y = 0; y < 2; y += 1) for (let x = from; x < to; x += 1) { const i = (y * 8 + x) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n += 1; }
+        const k = 2.6 / n;
+        return [r * k + base.r * 46, g * k + base.g * 46, b * k + base.b * 46].map(v => Math.round(clamp(v, 0, 255)));
+      };
+      const root = document.documentElement.style;
+      const left = zone(0, 3), centre = zone(3, 5), right = zone(5, 8);
+      const level = clamp((centre[0] + centre[1] + centre[2]) / 420, 0.15, 1);
+      root.setProperty("--glow-l", left.join(" "));
+      root.setProperty("--glow-c", centre.join(" "));
+      root.setProperty("--glow-r", right.join(" "));
+      root.setProperty("--glow-i", level.toFixed(3));
+    }
+
+    // Compile every shader and upload every texture up front, once per light
+    // configuration a stage can show, so no scene change stalls on first use.
+    warmup() {
+      if (this.disposed) return;
+      const renderer = this.renderer, world = this.cabinetWorld;
+      const hidden = [];
+      const reveal = object => { if (!object.visible) { hidden.push(object); object.visible = true; } };
+      try {
+        // Light-free presentation layers can be visible for every pass.
+        [this.world, this.challengeField, this.bonusTunnel, this.boostStreaks, this.atmosphere?.group].forEach(o => o && reveal(o));
+        this.atmosphere?.group.traverse(reveal);
+        const structures = Object.values(world?.structures || {}).map(profile => profile.group);
+        const configurations = [world?.stationStage, ...structures].filter(Boolean);
+        for (const active of configurations) {
+          for (const group of configurations) group.visible = group === active;
+          active.traverse(object => { if (object !== active && !object.visible) { hidden.push(object); object.visible = true; } });
+          renderer.compile(this.scene, this.camera);
+        }
+        for (const texture of this.textures) renderer.initTexture?.(texture);
+        this.title3D?.warm?.(renderer);
+      } catch (error) {
+        console.warn("描画の事前準備に失敗しました", error);
+      } finally {
+        hidden.forEach(object => { object.visible = false; });
+      }
+    }
+
+    // Keep the LCD fluid on slower GPUs: step the render resolution down once
+    // frames run long, then drop the costliest optical passes.
+    adaptQuality(now, frameMs) {
+      this.qualitySamples ||= [];
+      this.qualitySamples.push(frameMs);
+      if (now - (this.qualityCheckedAt || 0) < 2500) return;
+      this.qualityCheckedAt = now;
+      const samples = this.qualitySamples.sort((a, b) => a - b);
+      this.qualitySamples = [];
+      const typical = samples[Math.floor(samples.length * 0.75)] || 0;
+      if (typical < 24 || document.hidden) return;
+      const ratio = this.renderer.getPixelRatio();
+      if (ratio > 1.01) {
+        this.renderer.setPixelRatio(Math.max(1, ratio - 0.25));
+        this.forceResize = true;
+        this.resize();
+      } else if (!this.lowQuality) {
+        this.lowQuality = true;
+      }
+    }
+
+    captureTransition(type) {
+      if (!this.transitionTarget || !this.compositeTarget) return;
+      const renderer = this.renderer;
+      const previousTarget = renderer.getRenderTarget();
+      this.fxQuad.material = this.bloomDownMaterial;
+      this.bloomDownMaterial.uniforms.uTexture.value = this.compositeTarget.texture;
+      this.bloomDownMaterial.uniforms.uTexel.value.set(0.25 / this.compositeTarget.width, 0.25 / this.compositeTarget.height);
+      this.bloomDownMaterial.uniforms.uPrefilter.value = 0;
+      renderer.setRenderTarget(this.transitionTarget);
+      renderer.render(this.fxScene, this.postCamera);
+      renderer.setRenderTarget(previousTarget);
+      this.fxQuad.material = this.impactMaterial;
+      this.wipe = { at: performance.now(), type };
     }
 
     makeRenderTarget(width, height, depthBuffer = false) {
@@ -867,7 +1606,8 @@
 
       const bufferWidth = Math.max(2, Math.floor(width * FEEDBACK_SCALE));
       const bufferHeight = Math.max(2, Math.floor(height * FEEDBACK_SCALE));
-      if (!this.sceneTarget || this.sceneTarget.width !== bufferWidth || this.sceneTarget.height !== bufferHeight) {
+      if (this.forceResize || !this.sceneTarget || this.sceneTarget.width !== bufferWidth || this.sceneTarget.height !== bufferHeight) {
+        this.forceResize = false;
         this.renderTargets.forEach((target) => target.dispose());
         this.renderTargets = [];
         this.sceneTarget = this.makeRenderTarget(bufferWidth, bufferHeight, true);
@@ -875,6 +1615,21 @@
         this.feedbackWrite = this.makeRenderTarget(bufferWidth, bufferHeight);
         this.feedbackMaterial.uniforms.uResolution.value.set(bufferWidth, bufferHeight);
         this.displayMaterial.uniforms.uResolution.value.set(width, height);
+        const ratio = this.renderer.getPixelRatio();
+        const fullWidth = Math.max(2, Math.floor(width * ratio));
+        const fullHeight = Math.max(2, Math.floor(height * ratio));
+        this.compositeTarget = this.makeFxTarget(fullWidth, fullHeight, { depth: true, samples: 4 });
+        this.bloomTargets = [];
+        for (let level = 1; level <= 5; level += 1) {
+          this.bloomTargets.push(this.makeFxTarget(
+            Math.max(2, Math.floor(fullWidth / 2 ** level)),
+            Math.max(2, Math.floor(fullHeight / 2 ** level)),
+          ));
+        }
+        this.impactMaterial.uniforms.uResolution.value.set(fullWidth, fullHeight);
+        this.transitionTarget = this.makeFxTarget(fullWidth, fullHeight);
+        this.glowTarget = this.makeRenderTarget(8, 2);
+        this.glowPixels = new Uint8Array(8 * 2 * 4);
         this.clearFeedback();
       }
     }
@@ -906,6 +1661,10 @@
     setPresentation(kind = "normal", variant = 0, options = {}) {
       const nextKind = PRESENTATION_KEYS.includes(kind) ? kind : "normal";
       const changed = this.presentation.kind !== nextKind || this.presentation.variant !== variant;
+      if (this.presentation.kind !== nextKind && !options.immediate) {
+        this.captureTransition(this.nextWipeType ?? (nextKind === "challenge" ? 0 : nextKind === "bonus" ? 1 : 2));
+        this.nextWipeType = null;
+      }
       this.presentation = { kind: nextKind, variant: Number(variant) || 0 };
       PRESENTATION_KEYS.forEach((key) => {
         this.presentationTargets[key] = key === nextKind ? 1 : 0;
@@ -978,14 +1737,16 @@
         return;
       }
       if (this.presentation.kind === "bonus") {
+        // E12: cut between tunnel shots on bar heads of the playing BGM.
+        const shot = BONUS_SHOTS[this.bonusBarCut(time)];
         this.camera.position.set(
-          -1.2 + Math.sin(time * 0.48 + variant) * 0.55,
-          0.55 + Math.cos(time * 0.39) * 0.25,
-          7.4 - phase.speed * phase.local * 1.8,
+          shot[0] + Math.sin(time * 0.48 + variant) * 0.35,
+          shot[1] + Math.cos(time * 0.39) * 0.18,
+          shot[2] - phase.speed * phase.local * 1.8,
         );
-        this.camera.fov = (variant === 2 ? 68 : 54) + this.cutPulse * 7;
+        this.camera.fov = shot[5] + (variant === 2 ? 10 : 0) + this.cutPulse * 7;
         this.camera.updateProjectionMatrix();
-        this.camera.lookAt(0.7, -0.2, -16);
+        this.camera.lookAt(shot[3], shot[4], -16);
         return;
       }
       if (this.presentation.kind === "boost") {
@@ -1023,6 +1784,32 @@
       const targetX = phase.index === 6 ? -2.5 : phase.index % 2 ? -0.8 : 1.2;
       const targetY = phase.index === 4 ? 1.1 : 0;
       this.camera.lookAt(targetX, targetY, -9 - travel * 5);
+    }
+
+    // Picks the bonus shot. With BGM playing, a cut lands on the first kick
+    // after two bars (or one bar of a slow track); without it, on a timer.
+    bonusBarCut(time) {
+      const music = this.music;
+      const cut = this.bonusCut ||= { at: -Infinity, shot: 0, clock: null };
+      const beat = music.active > 0.5 && music.beat > 0 ? music.beat : 0;
+      const now = beat ? music.time : time;
+      const interval = beat ? ([4, 8, 16].map((n) => n * beat).find((s) => s >= 2.8) || 16 * beat) : 4.5;
+      const since = now - cut.at;
+      const onBeat = beat && since > interval * 0.9 && (music.onset || 0) > 0.35;
+      if (cut.clock !== Boolean(beat) || since < 0 || since > interval * 1.35 || onBeat || (!beat && since >= interval)) {
+        const first = cut.clock === null;
+        cut.clock = Boolean(beat);
+        cut.at = now;
+        if (!first) {
+          // Local xorshift: presentation only, never the game's random source.
+          let seed = (cut.seed ||= (Date.now() >>> 0) || 1);
+          seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+          cut.seed = seed;
+          cut.shot = (cut.shot + 1 + (seed % (BONUS_SHOTS.length - 1))) % BONUS_SHOTS.length;
+          this.cutPulse = Math.max(this.cutPulse, 0.55);
+        }
+      }
+      return cut.shot;
     }
 
     updatePresentationScenes(phase, time) {
@@ -1158,7 +1945,8 @@
       });
       if (this.slabs[0]) {
         this.slabs[0].material.color.copy(this.theme.primary);
-        this.slabs[0].material.opacity = 0.05 + density * 0.19;
+        // Solid slabs read as clutter over the ring tunnel; thin them out there.
+        this.slabs[0].material.opacity = (0.05 + density * 0.19) * (1 - this.presentationWeights.bonus * 0.7);
       }
 
       this.veilMaterial.uniforms.uTime.value = time;
@@ -1221,9 +2009,16 @@
 
     renderFrame(now) {
       if (!this.running || this.disposed) return;
-      const dt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
+      const frozen = Boolean(this.freezeUntil && now < this.freezeUntil);
+      this.adaptQuality(now, now - this.previousAt);
+      const frameDt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
+      if (frozen) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000;
+      // Slow motion: scene time runs at slowScale until slowUntil.
+      const slow = !frozen && this.slowUntil && now < this.slowUntil ? this.slowScale : 1;
+      if (slow < 1) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000 * (1 - slow);
+      const dt = frozen ? 0.0001 : frameDt * slow;
       this.previousAt = now;
-      const runningTime = (now - this.startedAt) / 1000;
+      const runningTime = (now - this.startedAt - (this.frozenMs || 0)) / 1000;
       if (!this.cabinetWorld?.waiting) this.battleHeldTime = null;
       else if (this.battleHeldTime == null) this.battleHeldTime = runningTime;
       const elapsed = this.battleHeldTime ?? runningTime;
@@ -1256,7 +2051,7 @@
             feedback: upperBoost ? .24 : .18,
             exposure: upperBoost ? .98 : .92,
           }
-          : phaseAt(quiet ? .04 : cycleProgress);
+          : phaseAt(quiet || (this.presentation.kind === "normal" && this.cabinetWorld?.stageKit) ? .04 : cycleProgress);
       if (phase.index !== this.lastPhase) {
         if (phase.index === 5) this.cutPulse = 1;
         if (phase.index === 6) this.clearFeedback();
@@ -1266,14 +2061,32 @@
       this.eventPulse = Math.max(0, this.eventPulse - dt * 1.4);
       this.updateTheme(now);
       this.updatePresentation(dt);
+      this.music.update(dt);
       const dynamics = this.options.getDynamics?.();
       if (dynamics) this.setEnergy(dynamics.intensity, dynamics.burst);
       this.updateCamera(phase, quiet ? elapsed * .03 : elapsed);
       const visual = this.updateWorld(phase, quiet ? elapsed * .03 : elapsed, quiet ? dt * .03 : dt);
       // Distinct room silhouettes must not be obscured by the station's abstract rails/veils.
-      this.world.visible = !(this.presentation.kind === 'normal' && ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage));
+      // The furnished stages carry the normal screen; the abstract rails / veils
+      // stay for CZ, bonus and boost (and as a fallback without the stage kit).
+      this.world.visible = !(this.presentation.kind === 'normal' && (this.cabinetWorld?.stageKit || ['同人音楽即売会', 'クラブのラウンジ'].includes(this.scenery?.stage)));
       if (this.battleEnabled) visual.disorder *= .3;
       this.cabinetWorld?.update(dt, elapsed);
+      this.applyNormalShot(now);
+      // Camera moves run after the world, which re-frames the camera per room.
+      if (this.cutOffset) {
+        // Hard cut in on the third stop, ease back out after the next lever.
+        if (!this.cutTarget) this.cutOffset.multiplyScalar(Math.exp(-dt * 3));
+        this.camera.position.add(this.cutOffset);
+        if (this.cutOffset.lengthSq() < 0.0004 && !this.cutTarget) this.cutOffset = null;
+      }
+      this.applyCameraMoves(now, dt);
+      const musicKick = this.music.kick * this.music.active;
+      if (musicKick > 0.01 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        this.camera.fov -= musicKick * 1.3;
+        this.camera.updateProjectionMatrix();
+      }
+      this.atmosphere?.update(dt, runningTime, this.music);
       const structureClarity = this.presentation.kind === 'normal'
         ? (['同人音楽即売会','クラブのラウンジ'].includes(this.scenery?.stage) ? 1 : 0)
         : this.presentation.kind === 'boost' ? .65 : .82;
@@ -1305,9 +2118,10 @@
       this.displayMaterial.uniforms.uDensity.value = visual.density;
       this.displayMaterial.uniforms.uCut.value = this.cutPulse;
       this.displayMaterial.uniforms.uClarity.value = structureClarity;
-      this.renderer.setRenderTarget(null);
+      this.renderer.setRenderTarget(this.compositeTarget);
       this.renderer.render(this.displayScene, this.postCamera);
       this.title3D?.render(now);
+      this.renderImpact(now);
 
       const swap = this.feedbackRead;
       this.feedbackRead = this.feedbackWrite;
@@ -1334,6 +2148,7 @@
 
     start() {
       if (this.running || this.disposed) return;
+      if (!this.warmedUp) { this.warmedUp = true; window.setTimeout(() => this.warmup(), 600); }
       this.running = true;
       this.previousAt = performance.now();
       this.rafId = requestAnimationFrame((time) => this.renderFrame(time));
