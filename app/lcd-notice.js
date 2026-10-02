@@ -18,13 +18,18 @@
 
   // PRIVATE_SPEC: rates / weights for the presentation lottery.
   const OUTCOMES = {
-    none: { rate: 0.05, tiers: [62, 30, 8, 0, 0, 0, 0], kinds: { step: 40, board: 25, push: 15, train: 20, blackout: 0 } },
-    weak: { rate: 0.10, tiers: [40, 36, 18, 6, 0, 0, 0], kinds: { step: 35, board: 25, push: 20, train: 20, blackout: 0 } },
+    none: { rate: 0.10, tiers: [62, 30, 8, 0, 0, 0, 0], kinds: { step: 40, board: 25, push: 15, train: 20, blackout: 0 } },
+    weak: { rate: 0.18, tiers: [40, 36, 18, 6, 0, 0, 0], kinds: { step: 35, board: 25, push: 20, train: 20, blackout: 0 } },
     strong: { rate: 0.18, tiers: [22, 34, 26, 15, 3, 0, 0], kinds: { step: 30, board: 20, push: 25, train: 15, blackout: 10 } },
     cz: { rate: 0.55, tiers: [4, 14, 24, 26, 24, 8, 0], kinds: { step: 25, board: 20, push: 20, train: 15, blackout: 20 } },
     win: { rate: 0.70, tiers: [2, 8, 14, 20, 32, 18, 6], kinds: { step: 20, board: 20, push: 20, train: 15, blackout: 25 } },
   };
   const PREMIUM_RATE_ON_WIN = 0.04;
+  // Small roles always bring the venue board, at least at this tier.
+  const ROLE_TIER = { replay: 0, bell: 1, watermelon: 2, cherry: 3, strongCherry: 4 };
+  // Venue boards stay readable at least this long, even through fast play.
+  const BOARD_HOLD_MS = 2600;
+  const BOARD_SELECTOR = ".notice-board, .notice-sales, .notice-floor";
 
   function create(env) {
     const { random, fx, schedule } = env;
@@ -109,6 +114,7 @@
         layer.append(node);
       }
       layer.hidden = false;
+      hold(node);
       setColor(node, tier);
       node.querySelector("b").textContent = BOARD_TYPES[tier];
       if (flip) {
@@ -128,6 +134,7 @@
         layer.append(node);
       }
       layer.hidden = false;
+      hold(node);
       setColor(node, tier);
       const figure = node.querySelector("strong");
       const id = serial;
@@ -142,7 +149,7 @@
       };
       if (!roll || env.reduced()) return land();
       node.classList.add("is-rolling");
-      const ticks = 8 + tier * 2;
+      const ticks = 6 + tier;
       for (let i = 0; i < ticks; i += 1) {
         schedule(() => {
           if (id !== serial) return;
@@ -162,6 +169,7 @@
         layer.append(node);
       }
       layer.hidden = false;
+      hold(node);
       setColor(node, tier);
       const text = node.querySelector("span");
       text.textContent = FLOOR[tier];
@@ -204,11 +212,29 @@
       scene()?.notice?.(trainGrade(tier), random() < 0.5 ? 1 : -1, tier);
     }
 
-    function clear() {
+    function hold(node) {
+      node.dataset.until = String(Date.now() + BOARD_HOLD_MS);
+      node.classList.remove("is-leaving");
+    }
+    // Boards linger until their hold runs out, then fade away.
+    function retire(node) {
+      const wait = Number(node.dataset.until || 0) - Date.now();
+      if (wait > 0) { window.setTimeout(() => node.isConnected && retire(node), wait); return; }
+      node.classList.add("is-leaving");
+      window.setTimeout(() => {
+        if (!node.isConnected || Number(node.dataset.until || 0) > Date.now()) return;
+        node.remove();
+        if (!layer.children.length) layer.hidden = true;
+      }, 400);
+    }
+
+    function clear(keepBoards = false) {
       serial += 1;
       active = null;
-      layer.replaceChildren();
-      layer.hidden = true;
+      const boards = keepBoards ? [...layer.querySelectorAll(BOARD_SELECTOR)] : [];
+      layer.replaceChildren(...boards);
+      layer.hidden = !boards.length;
+      boards.forEach(retire);
       panel()?.classList.remove("notice-blackout", "notice-release", "notice-flicker", "notice-premium", "notice-quake");
       machineWindow()?.classList.remove("notice-lamps", "notice-premium");
       const button = pushButton();
@@ -233,16 +259,19 @@
     }
 
     function lever(cue = {}, stage = "") {
-      clear();
+      clear(true);
       if (env.reduced()) return;
       const key = cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none";
       if (cue.win && random() < PREMIUM_RATE_ON_WIN) return premium(stage);
       const outcome = OUTCOMES[key];
-      if (random() >= outcome.rate) return;
+      const roleTier = ROLE_TIER[cue.role];
+      const triggered = random() < outcome.rate;
+      if (!triggered && roleTier === undefined) return;
       const venue = venueOf(stage);
       const station = venue === "station";
-      const kind = pick(outcome.kinds);
-      const tier = Number(pick(outcome.tiers));
+      // Replay / bell / watermelon / cherry always show the venue board.
+      const kind = roleTier !== undefined ? "board" : pick(outcome.kinds);
+      const tier = Math.max(roleTier ?? 0, triggered ? Number(pick(outcome.tiers)) : 0);
       const id = serial;
       active = { id, kind, tier, stage, venue, station, path: ladder(tier), revealed: false };
 
@@ -315,7 +344,7 @@
       }
       if (order === 3) {
         const id = notice.id;
-        schedule(() => { if (id === serial) clear(); }, 1500);
+        schedule(() => { if (id === serial) clear(true); }, 1500);
       }
     }
 

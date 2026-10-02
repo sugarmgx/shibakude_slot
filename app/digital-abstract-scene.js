@@ -1193,6 +1193,17 @@
       }
     }
 
+    // Hit stop: the picture holds still for a few frames.
+    hitStop(ms = 70) {
+      this.freezeUntil = Math.max(this.freezeUntil || 0, performance.now() + ms);
+    }
+
+    // Slow motion for `ms` at `scale` of normal speed.
+    slowMotion(ms = 500, scale = 0.25) {
+      this.slowUntil = performance.now() + ms;
+      this.slowScale = scale;
+    }
+
     // Hall notice: the crowd jumps (0..1).
     crowdSurge(amount = 1) {
       if (this.atmosphere) this.atmosphere.crowdHype = Math.max(this.atmosphere.crowdHype || 0, amount);
@@ -2002,7 +2013,10 @@
       this.adaptQuality(now, now - this.previousAt);
       const frameDt = Math.min(0.05, Math.max(0.001, (now - this.previousAt) / 1000));
       if (frozen) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000;
-      const dt = frozen ? 0.0001 : frameDt;
+      // Slow motion: scene time runs at slowScale until slowUntil.
+      const slow = !frozen && this.slowUntil && now < this.slowUntil ? this.slowScale : 1;
+      if (slow < 1) this.frozenMs = (this.frozenMs || 0) + frameDt * 1000 * (1 - slow);
+      const dt = frozen ? 0.0001 : frameDt * slow;
       this.previousAt = now;
       const runningTime = (now - this.startedAt - (this.frozenMs || 0)) / 1000;
       if (!this.cabinetWorld?.waiting) this.battleHeldTime = null;

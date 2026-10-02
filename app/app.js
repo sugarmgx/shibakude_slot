@@ -2428,7 +2428,7 @@ function playSoundEffect(key, volumeScale = 1) {
   sound.slotGainScale = config.gain * volumeScale;
   sound.slotMixer = config.mixer || "sound";
   const mixerGain = sound.slotMixer === "music" ? currentMusicGain() : ui.soundVolume;
-  sound.volume = Math.max(0, Math.min(1, mixerGain * sound.slotGainScale));
+  sound.volume = Math.max(0, Math.min(1, mixerGain * sound.slotGainScale * (ui.audioDuck ?? 1)));
   sound.currentTime = 0;
   document.documentElement.dataset.lastSfx = JSON.stringify({ key, volume: sound.volume, at: Date.now() });
   ui.activeSfx.add(sound);
@@ -2575,8 +2575,33 @@ function currentMusicGain() {
 }
 
 function musicTrackGain(type) {
-  return Math.min(1, currentMusicGain() * 10 ** ((BONUS_MUSIC[type]?.gainDb || 0) / 20));
+  return Math.min(1, currentMusicGain() * 10 ** ((BONUS_MUSIC[type]?.gainDb || 0) / 20)) * (ui.audioDuck ?? 1);
 }
+
+// 1: presentation ducking. BGM and sound effects sink to `target` over `ms`
+// (the "muffled" build) and snap back with target 1 (the "open" release).
+// HTMLAudio cannot be filtered on file://, so the build is a volume duck.
+function setAudioDuck(target = 1, ms = 0) {
+  cancelAnimationFrame(ui.audioDuckRaf || 0);
+  const from = ui.audioDuck ?? 1;
+  const began = performance.now();
+  const apply = () => {
+    const music = ui.musicType ? ui.musicElements.get(ui.musicType) : null;
+    if (music) music.volume = musicTrackGain(ui.musicType);
+    for (const sound of ui.activeSfx) {
+      const mixer = sound.slotMixer === "music" ? currentMusicGain() : ui.soundVolume;
+      sound.volume = Math.max(0, Math.min(1, mixer * (Number(sound.slotGainScale) || 1) * ui.audioDuck));
+    }
+  };
+  const frame = (now) => {
+    const t = ms > 0 ? Math.min(1, (now - began) / ms) : 1;
+    ui.audioDuck = from + (target - from) * t;
+    apply();
+    if (t < 1) ui.audioDuckRaf = requestAnimationFrame(frame);
+  };
+  frame(performance.now());
+}
+window.ShibakuAudioDuck = setAudioDuck;
 
 function currentMusicGainDb() {
   const gain = currentMusicGain();
@@ -2951,13 +2976,18 @@ function beginPendingSpin(afterState, force = null) {
   // presentation layer only. The notice picks its own look with its own
   // random stream; the game lottery is never consumed or changed.
   const leverCue = state.mode === "normal" && !middleCherryResult
-    ? { win: !["normal", "cz"].includes(afterState.mode), cz: afterState.mode === "cz", rare: isRareResult ? rareKind : "none" }
+    ? { win: !["normal", "cz"].includes(afterState.mode), cz: afterState.mode === "cz", rare: isRareResult ? rareKind : "none", role: internalRoleKey }
     : null;
   if (leverCue) window.ShibakuEffects?.noticeCue?.(leverCue);
   // 3 / 4: lever silence and a delayed third stop, drawn by the presentation
   // layer from the already-resolved result.
   const leverSilence = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.leverSilenceRoll?.(leverCue));
   const thirdStopDelay = Boolean(leverCue && !ui.debugFast && window.ShibakuEffects?.thirdStopDelayRoll?.(leverCue));
+  // 1: a promising game sounds muffled from the lever; the release opens it.
+  const czFinalGame = state.mode === "cz" && state.cz?.gamesLeft === 1;
+  if (!ui.debugFast && (leverCue || czFinalGame)) {
+    window.ShibakuEffects?.muffleCue?.(leverCue || { cz: true, czFinal: true });
+  }
   ui.spinningReels = [true, true, true];
   ui.deceleratingReels = [false, false, false];
   ui.reelPositions = state.reelStops.map((stopIndex, reelIndex) => wrapIndex(stopIndex, REEL_STRIPS[reelIndex].length));
@@ -3103,7 +3133,10 @@ async function animateReelSlip(reelIndex, targetStop, pendingAtStart = ui.pendin
   const stripLength = REEL_STRIPS[reelIndex].length;
   const startPosition = wrapIndex(ui.reelPositions[reelIndex], stripLength);
   const travelSymbols = wrapIndex(startPosition - targetStop, stripLength);
-  const duration = scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1);
+  const slowFactor = ui.reelSlowFactor || 1;
+  const duration = slowFactor > 1
+    ? Math.max(480, scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1) * slowFactor)
+    : scaledDelay(Math.max(1, travelSymbols * ui.reelStepMs), 1);
 
   const specialForcedStop = ui.pendingSpin?.afterState?.mode === "bonusReady"
     || Boolean(ui.pendingSpin?.afterState?.bt?.bonusType)
@@ -3587,11 +3620,22 @@ async function stopReelChecked(reelIndex) {
     if (ui.pendingSpin !== pendingAtStart) return;
   }
   ui.deceleratingReels[reelIndex] = true;
+  // 3: the reel that lines up the bonus sevens slides in slow motion.
+  const sevensLanding = isThirdStop && !ui.debugFast
+    && ["big", "blueBig", "reg"].includes(controlCatalogKey(pendingAtStart.displayRoleKey))
+    && !pendingAtStart.afterState.displayMissedRole;
+  if (sevensLanding) {
+    ui.reelSlowFactor = 7;
+    window.ShibakuEffects?.slowMotion?.(650);
+  }
   const completedSlip = await animateReelSlip(reelIndex, targetStop, pendingAtStart);
+  ui.reelSlowFactor = 1;
   if (!completedSlip || ui.pendingSpin !== pendingAtStart) return;
   ui.spinningReels[reelIndex] = false;
   ui.deceleratingReels[reelIndex] = false;
   playReelStopSound(reelIndex);
+  // 2: every stop lands with a small jolt.
+  window.ShibakuEffects?.stopJolt?.(pendingAtStart.nextStop + 1);
   window.ShibakuEffects?.normalCueStop?.(pendingAtStart.nextStop + 1, pendingAtStart.displayRoleKey);
   if (state.mode === "cz" && state.cz?.key === "shibaku") {
     window.ShibakuEffects?.battleBeat?.(pendingAtStart.nextStop + 1, pendingAtStart.afterState.cz?.lastBattleRole, {
@@ -3775,6 +3819,7 @@ function finishPendingSpin() {
     && afterState.mode === "bonusReady"
     && Boolean(window.ShibakuEffects?.czRevivalRoll?.());
   let resultSoundDelay = 0;
+  const muffleOpens = winFromNormal || czFromNormal || (beforeState.mode === "cz" && afterState.mode === "bonusReady");
   if (unkoReversal) {
     resultSoundDelay = window.ShibakuEffects.czRevival() || 0;
     lockMainAction(resultSoundDelay + 300, "cz-revival");
@@ -3783,6 +3828,7 @@ function finishPendingSpin() {
     resultSoundDelay = 380;
     window.ShibakuEffects?.silenceBeat?.(resultSoundDelay);
   }
+  window.ShibakuEffects?.muffleRelease?.(muffleOpens, resultSoundDelay);
   // D10: the drum lands (slow / slip / overshoot) before the result shows.
   const btLandingMs = btDrumResult && !ui.debugFast
     ? window.ShibakuEffects?.btLanding?.(btDrumResult, beforeState.bt?.misses || 0) || 0
@@ -3814,6 +3860,17 @@ function finishPendingSpin() {
   }
   if (["bonus", "at", "tama"].includes(beforeState.mode) && afterState.displayRoleKey === "bell") {
     window.ShibakuCabinet?.bellPayout(afterState.settledPayout || 0);
+    // 7: coins burst out of the payout into the coin counter.
+    if (!ui.debugFast) window.ShibakuEffects?.coinShower?.(afterState.settledPayout || 0);
+  }
+  // 9: coin milestones inside the bonus.
+  // (bonus coins, and the boost's running total).
+  const coinsOf = (st) => (st.mode === "bonus" ? st.bonus?.coins : ["at", "tama"].includes(st.mode) ? st.at?.coins : null);
+  if (!ui.debugFast && coinsOf(beforeState) != null && coinsOf(afterState) != null && beforeState.mode === afterState.mode) {
+    const before = coinsOf(beforeState) || 0;
+    const after = coinsOf(afterState) || 0;
+    const mark = [500, 300, 100].find((m) => before < m && after >= m);
+    if (mark) window.ShibakuEffects?.coinMilestone?.(mark);
   }
 
   if (state.mode === "cz" && state.cz?.key === "shibaku" && state.cz.pushPending) {

@@ -39,6 +39,10 @@
     floorChime: {},
     floorCreak: {},
     floorThud: {},
+    pressure: {},
+    openUp: {},
+    coin: { gain: 0.6 },
+    milestone: {},
   };
 
   const files = new Map();   // name -> HTMLAudioElement (only when the file loaded)
@@ -324,6 +328,37 @@
       tone(ctx, out, { f0: 60, f1: 28, t, dur: 0.5 + level * 0.1, peak: 0.6 + level * 0.07 });
       hiss(ctx, out, { t, dur: 0.4 + level * 0.1, peak: 0.25, type: "lowpass", freq: 900, freq1: 200 });
       return 0.9;
+    },
+    pressure(ctx, out, t) {
+      // Muffled build: a low, closing hum that thickens for a few seconds.
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.setValueAtTime(900, t);
+      lp.frequency.exponentialRampToValueAtTime(220, t + 3);
+      lp.connect(out);
+      tone(ctx, lp, { type: "sawtooth", f0: 55, t, dur: 4, peak: 0.12, attack: 1.2 });
+      tone(ctx, lp, { type: "sawtooth", f0: 55.4, t, dur: 4, peak: 0.12, attack: 1.2 });
+      hiss(ctx, lp, { t, dur: 4, peak: 0.1, attack: 2, type: "lowpass", freq: 500 });
+      return 4.2;
+    },
+    openUp(ctx, out, t) {
+      // Release: the filter bursts open into a bright shimmer.
+      hiss(ctx, out, { t, dur: 0.6, peak: 0.35, attack: 0.01, type: "highpass", freq: 300, freq1: 9000, q: 0.7 });
+      [72, 79, 84, 88, 91].forEach((n, i) => tone(ctx, out, { type: "triangle", f0: midi(n), t: t + i * 0.025, dur: 0.9, peak: 0.08 }));
+      tone(ctx, out, { f0: 80, f1: 40, t, dur: 0.35, peak: 0.6 });
+      return 1;
+    },
+    coin(ctx, out, t, o) {
+      const pitch = 96 + ((o.level || 0) % 5);
+      tone(ctx, out, { type: "triangle", f0: midi(pitch), t, dur: 0.12, peak: 0.12 });
+      tone(ctx, out, { type: "triangle", f0: midi(pitch + 7), t: t + 0.03, dur: 0.18, peak: 0.08 });
+      return 0.25;
+    },
+    milestone(ctx, out, t, o) {
+      const lift = (o.level || 0) * 2;
+      [72, 76, 79, 84].forEach((n, i) => tone(ctx, out, { type: "square", f0: midi(n + lift), t: t + i * 0.09, dur: i === 3 ? 0.7 : 0.12, peak: 0.08 }));
+      [84, 88, 91].forEach((n) => tone(ctx, out, { type: "sawtooth", f0: midi(n + lift), t: t + 0.27, dur: 0.8, peak: 0.05 }));
+      return 1.2;
     },
     premiumHit(ctx, out, t) {
       [72, 76, 79, 84, 88].forEach((n, i) => tone(ctx, out, { type: "triangle", f0: midi(n), t: t + i * 0.06, dur: 1.2, peak: 0.12 }));

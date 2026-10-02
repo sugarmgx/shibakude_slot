@@ -60,6 +60,11 @@
     api.burst = 0;
     api.battleHeld = false;
     notices?.clear();
+    lcdCoins?.clear();
+    muffled = null;
+    window.ShibakuAudioDuck?.(1, 0);
+    document.querySelector("#lcdScreen .lcd-milestone")?.remove();
+    document.querySelector(".machine-panel")?.classList.remove("muffled", "hit-shake");
     api.battleEnd?.();
     document.querySelector(".machine-panel")?.classList.remove("baba-third-hit-blackout", "baba-bonus-blackout", "tama-blackout", "middle-cherry-blackout", "tama-acquired-glow", "cz-final", "last-lamp");
     document.querySelector(".machine-panel")?.classList.remove("silence-beat", "reel-freeze");
@@ -630,6 +635,7 @@
     pushButton()?.classList.remove("is-hot");
     if (won) {
       if (!options.revival) glass.clear();
+      api.hitImpact(1.3);
       flash("hit");
       api.abstractScene?.pulse(4);
       api.abstractScene?.impact?.({ strength: 1, hold: 0.12, color: 0xffc247, rays: 1 });
@@ -776,6 +782,85 @@
     }, ms);
   });
 
+  // 2: hit stop - the picture holds for a few frames and the cabinet jolts.
+  api.hitImpact = (strength = 1) => {
+    if (reducedMotion.matches) return;
+    api.abstractScene?.hitStop?.(50 + strength * 50);
+    const panel = document.querySelector(".machine-panel");
+    panel?.style.setProperty("--hit", String(Math.min(1.5, strength)));
+    panel?.classList.remove("hit-shake");
+    void panel?.offsetWidth;
+    panel?.classList.add("hit-shake");
+    scheduleEffect(() => panel?.classList.remove("hit-shake"), 360);
+  };
+  api.stopJolt = (order = 1) => {
+    if (reducedMotion.matches) return;
+    const machineWindow = document.querySelector(".machine-window");
+    machineWindow?.classList.remove("stop-jolt", "stop-jolt-last");
+    void machineWindow?.offsetWidth;
+    machineWindow?.classList.add(order >= 3 ? "stop-jolt-last" : "stop-jolt");
+  };
+  // 3: slow motion on the scene while the sevens slide in.
+  api.slowMotion = (ms = 600) => {
+    if (reducedMotion.matches) return;
+    api.abstractScene?.slowMotion?.(ms, 0.22);
+  };
+
+  // 1: muffled build -> open release. PRIVATE_SPEC rates by resolved result.
+  const MUFFLE_RATE = { win: .6, cz: .5, strong: .15, weak: .05, none: .02 };
+  let muffled = null;
+  api.muffleCue = (cue = {}) => {
+    if (reducedMotion.matches) return;
+    const rate = cue.czFinal ? .7 : MUFFLE_RATE[cue.win ? "win" : cue.cz ? "cz" : ["strong", "freeze"].includes(cue.rare) ? "strong" : cue.rare === "weak" ? "weak" : "none"];
+    if (cueRandom() >= rate) return;
+    muffled = { pressure: fx("pressure") };
+    window.ShibakuAudioDuck?.(0.3, 1400);
+    document.querySelector(".machine-panel")?.classList.add("muffled");
+  };
+  api.muffleRelease = (open = false, delay = 0) => {
+    const was = muffled;
+    muffled = null;
+    const run = () => {
+      was?.pressure?.stop?.();
+      document.querySelector(".machine-panel")?.classList.remove("muffled");
+      if (open) {
+        window.ShibakuAudioDuck?.(1, 0);
+        if (was) fx("openUp");
+        api.hitImpact(was ? 1.2 : 0.8);
+      } else if (was) {
+        window.ShibakuAudioDuck?.(1, 500);
+      }
+    };
+    if (delay > 0) scheduleEffect(run, delay);
+    else run();
+  };
+
+  // 7: coins burst out on a payout and fly into the coin counter.
+  const lcdCoins = window.ShibakuLcdCoins ? new window.ShibakuLcdCoins(document.querySelector("#lcdScreen")) : null;
+  api.coinShower = (coins = 0) => {
+    if (!lcdCoins || reducedMotion.matches || coins <= 0) return;
+    const count = Math.min(28, 6 + coins * 2);
+    const target = document.querySelector("#lcdSessionInfo:not([hidden])");
+    lcdCoins.shower(count, target, (i) => { if (i % 3 === 0) fx("coin", { level: i }); });
+  };
+
+  // 9: coin milestones during the bonus.
+  api.coinMilestone = (mark) => {
+    const screen = document.querySelector("#lcdScreen");
+    if (!screen) return;
+    screen.querySelector(".lcd-milestone")?.remove();
+    const node = document.createElement("div");
+    node.className = `lcd-milestone tier-${mark >= 500 ? 3 : mark >= 300 ? 2 : 1}`;
+    node.setAttribute("aria-hidden", "true");
+    node.innerHTML = `<strong>${mark}枚</strong><span>突破</span>`;
+    screen.append(node);
+    fx("milestone", { level: mark >= 500 ? 2 : mark >= 300 ? 1 : 0 });
+    flash("hit");
+    api.hitImpact(mark >= 500 ? 1 : 0.6);
+    api.abstractScene?.impact?.({ strength: .6, hold: 0, color: 0xffd23a, rays: mark >= 300 ? 1 : .6, disturb: false });
+    scheduleEffect(() => node.remove(), 1700);
+  };
+
   // PRIVATE_SPEC: 3 lever silence / 4 third-stop delay rates by resolved result.
   const LEVER_SILENCE_RATE = { win: .25, cz: .15, strong: .06, weak: .02, none: .006 };
   const THIRD_STOP_DELAY_RATE = { win: .35, cz: .22, strong: .08, weak: .03, none: .01 };
@@ -814,6 +899,7 @@
     document.querySelector(".machine-window")?.classList.add("notice-premium");
     fx("premiumHit");
     api.reelFlash("fanfare");
+    api.hitImpact(1.5);
     flash("hit");
     api.abstractScene?.impact?.({ strength: 1.2, hold: .05, color: 0xffffff, rays: 1.4 });
     scheduleEffect(() => {
@@ -889,6 +975,7 @@
     machineWindow?.classList.add("bonus-confirmed", className);
     // 9: LCD, lamps and reels go off together on the fanfare.
     api.reelFlash("fanfare");
+    api.hitImpact(1.2);
     machineWindow?.classList.remove("lamp-fanfare");
     void machineWindow?.offsetWidth;
     machineWindow?.classList.add("lamp-fanfare");
@@ -940,6 +1027,7 @@
       if (api.latestState) api.update(api.latestState);
       // 6: the LCD glass bursts as the light comes back.
       if (!reducedMotion.matches) { glass.shatter(); fx("glassBreak2"); }
+      api.hitImpact(1.3);
       flash("hit");
       api.abstractScene?.impact?.({ strength: .9, hold: .04, color: 0xffd84a, rays: 1 });
       document.querySelector(".machine-window")?.classList.add("baba-bonus-ready-glow");
